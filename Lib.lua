@@ -1,5 +1,5 @@
 --[[
-    Redev Lib v3.0
+    Redev Lib v3.0 - Fixed for Roblox Lua
     A premium, lightweight UI library for Roblox
 ]]
 
@@ -532,9 +532,9 @@ function Window:CreateTab(name)
     button.AutoButtonColor = false
     CreateRounded(button, 8)
     
-    -- Hover effect
+    -- Hover effect - FIXED: Removed optional chaining
     button.MouseEnter:Connect(function()
-        if button ~= self.CurrentTab?.Button then
+        if self.CurrentTab and button ~= self.CurrentTab.Button then
             TweenService:Create(button, TweenInfoFast, {
                 BackgroundTransparency = 0.9,
                 BackgroundColor3 = self.Theme.Tertiary
@@ -543,7 +543,7 @@ function Window:CreateTab(name)
     end)
     
     button.MouseLeave:Connect(function()
-        if button ~= self.CurrentTab?.Button then
+        if self.CurrentTab and button ~= self.CurrentTab.Button then
             TweenService:Create(button, TweenInfoFast, {
                 BackgroundTransparency = 1,
                 BackgroundColor3 = Color3.fromRGB(255, 255, 255)
