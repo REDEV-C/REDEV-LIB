@@ -1,5 +1,5 @@
 --[[
-    Redev Lib v3.0 - Fixed for Roblox Lua
+    Redev Lib v3.0
     A premium, lightweight UI library for Roblox
 ]]
 
@@ -27,9 +27,6 @@ Library.Theme = {
     Border = Color3.fromRGB(40, 40, 40),
     BorderLight = Color3.fromRGB(55, 55, 55),
 }
-
-local TweenInfoStandard = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local TweenInfoStandardFast = TweenInfoStandard.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 -- Utility functions
 local function CreateRounded(instance, radius)
@@ -74,7 +71,7 @@ local function CreateRipple(parent, position)
     ripple.ZIndex = 10
     CreateRounded(ripple, 5)
     
-    TweenService:Create(ripple, TweenInfoStandard.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+    TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, 60, 0, 60),
         Position = UDim2.new(0, position.X - 30, 0, position.Y - 30),
         BackgroundTransparency = 1
@@ -86,6 +83,7 @@ end
 
 -- Notification system
 local NotificationContainer = nil
+local ActiveNotifications = {}
 
 local function CreateNotificationContainer()
     if NotificationContainer then return NotificationContainer end
@@ -93,6 +91,7 @@ local function CreateNotificationContainer()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "RedevNotifications"
     screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
     screenGui.Parent = Players.LocalPlayer.PlayerGui
     
     local container = Instance.new("Frame")
@@ -114,6 +113,7 @@ local function CreateNotificationContainer()
     return container
 end
 
+-- Custom notification function
 function Library:Notify(data)
     data = data or {}
     local title = data.Title or "Notification"
@@ -137,6 +137,7 @@ function Library:Notify(data)
     
     local container = CreateNotificationContainer()
     
+    -- Main notification frame
     local notification = Instance.new("Frame")
     notification.Parent = container
     notification.Size = UDim2.new(1, 0, 0, 0)
@@ -144,11 +145,12 @@ function Library:Notify(data)
     notification.BackgroundTransparency = 1
     notification.ClipsDescendants = true
     notification.AutomaticSize = Enum.AutomaticSize.Y
+    notification.ZIndex = 2
     
     CreateRounded(notification, 10)
     CreateStroke(notification, colors[type] or Library.Theme.Accent, 1.5)
     
-    -- Color stripe
+    -- Color stripe on the left
     local stripe = Instance.new("Frame")
     stripe.Parent = notification
     stripe.Size = UDim2.new(0, 4, 1, -2)
@@ -167,6 +169,7 @@ function Library:Notify(data)
     iconLabel.TextColor3 = colors[type] or Library.Theme.Accent
     iconLabel.TextSize = 18
     iconLabel.Font = Enum.Font.GothamBold
+    iconLabel.TextXAlignment = Enum.TextXAlignment.Center
     
     -- Title
     local titleLabel = Instance.new("TextLabel")
@@ -207,15 +210,16 @@ function Library:Notify(data)
     closeBtn.TextSize = 13
     closeBtn.Font = Enum.Font.Gotham
     closeBtn.BorderSizePixel = 0
+    closeBtn.ZIndex = 3
     
     closeBtn.MouseEnter:Connect(function()
-        TweenService:Create(closeBtn, TweenInfoStandardFast, {
+        TweenService:Create(closeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             TextColor3 = Library.Theme.Text
         }):Play()
     end)
     
     closeBtn.MouseLeave:Connect(function()
-        TweenService:Create(closeBtn, TweenInfoStandardFast, {
+        TweenService:Create(closeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             TextColor3 = Library.Theme.TextDark
         }):Play()
     end)
@@ -233,21 +237,33 @@ function Library:Notify(data)
     progress.BorderSizePixel = 0
     CreateRounded(progress, 1)
     
+    -- Store notification data
+    local notificationData = {
+        Frame = notification,
+        Progress = progress,
+        Duration = duration,
+        Type = type,
+        Title = title,
+        Content = content
+    }
+    
+    table.insert(ActiveNotifications, notificationData)
+    
     -- Animate in
     notification.Size = UDim2.new(1, 0, 0, 0)
     notification.BackgroundTransparency = 1
     
-    task.wait(0.1)
+    task.wait(0.05)
     
     local targetHeight = titleLabel.AbsoluteSize.Y + contentLabel.AbsoluteSize.Y + 25
-    TweenService:Create(notification, TweenInfoStandard, {
+    TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(1, 0, 0, targetHeight),
         BackgroundTransparency = 0
     }):Play()
     
     -- Animate progress bar
     if duration > 0 then
-        TweenService:Create(progress, TweenInfoStandard.new(duration, Enum.EasingStyle.Linear), {
+        TweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
             Size = UDim2.new(0, 0, 0, 2)
         }):Play()
         
@@ -257,19 +273,34 @@ function Library:Notify(data)
         end
     end
     
-    return notification
+    return notificationData
 end
 
 function Library:CloseNotification(notification)
     if not notification then return end
     
-    TweenService:Create(notification, TweenInfoStandard.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+    -- Remove from active list
+    for i, data in ipairs(ActiveNotifications) do
+        if data.Frame == notification then
+            table.remove(ActiveNotifications, i)
+            break
+        end
+    end
+    
+    TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         Size = UDim2.new(1, 0, 0, 0),
         BackgroundTransparency = 1
     }):Play()
     
     task.wait(0.3)
     notification:Destroy()
+end
+
+function Library:ClearNotifications()
+    for _, data in ipairs(ActiveNotifications) do
+        Library:CloseNotification(data.Frame)
+    end
+    ActiveNotifications = {}
 end
 
 -- Window class
@@ -293,6 +324,7 @@ function Window.new(title, properties)
     self.ScreenGui.Name = "RedevUI"
     self.ScreenGui.ResetOnSpawn = false
     self.ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    self.ScreenGui.IgnoreGuiInset = true
     self.ScreenGui.Parent = Players.LocalPlayer.PlayerGui
     
     -- Main frame
@@ -304,6 +336,7 @@ function Window.new(title, properties)
     self.Main.BackgroundColor3 = self.Theme.Background
     self.Main.BorderSizePixel = 0
     self.Main.ClipsDescendants = true
+    self.Main.ZIndex = 1
     
     -- Opening animation
     self.Main.Scale = UDim2.new(0.9, 0, 0.9, 0)
@@ -319,6 +352,7 @@ function Window.new(title, properties)
     self.TitleBar.Size = UDim2.new(1, 0, 0, 44)
     self.TitleBar.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
     self.TitleBar.BorderSizePixel = 0
+    self.TitleBar.ZIndex = 2
     CreateRounded(self.TitleBar, 14)
     
     -- Title bar gradient
@@ -337,6 +371,7 @@ function Window.new(title, properties)
     divider.Size = UDim2.new(1, 0, 0, 1)
     divider.BackgroundColor3 = self.Theme.Border
     divider.BorderSizePixel = 0
+    divider.ZIndex = 3
     
     -- Title text
     self.TitleLabel = Instance.new("TextLabel")
@@ -349,6 +384,7 @@ function Window.new(title, properties)
     self.TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     self.TitleLabel.Font = Enum.Font.GothamBold
     self.TitleLabel.TextSize = 17
+    self.TitleLabel.ZIndex = 4
     
     -- Min/Max buttons
     local btnSize = UDim2.new(0, 28, 0, 28)
@@ -363,15 +399,17 @@ function Window.new(title, properties)
     self.MinimizeBtn.TextSize = 18
     self.MinimizeBtn.Font = Enum.Font.Gotham
     self.MinimizeBtn.BorderSizePixel = 0
+    self.MinimizeBtn.ZIndex = 4
+    self.MinimizeBtn.AutoButtonColor = false
     
     self.MinimizeBtn.MouseEnter:Connect(function()
-        TweenService:Create(self.MinimizeBtn, TweenInfoStandardFast, {
+        TweenService:Create(self.MinimizeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 0.9
         }):Play()
     end)
     
     self.MinimizeBtn.MouseLeave:Connect(function()
-        TweenService:Create(self.MinimizeBtn, TweenInfoStandardFast, {
+        TweenService:Create(self.MinimizeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 1
         }):Play()
     end)
@@ -386,23 +424,25 @@ function Window.new(title, properties)
     self.CloseBtn.TextSize = 16
     self.CloseBtn.Font = Enum.Font.Gotham
     self.CloseBtn.BorderSizePixel = 0
+    self.CloseBtn.ZIndex = 4
+    self.CloseBtn.AutoButtonColor = false
     
     self.CloseBtn.MouseEnter:Connect(function()
-        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
+        TweenService:Create(self.CloseBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 0.9,
             BackgroundColor3 = self.Theme.Error
         }):Play()
-        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
+        TweenService:Create(self.CloseBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             TextColor3 = Color3.fromRGB(255, 255, 255)
         }):Play()
     end)
     
     self.CloseBtn.MouseLeave:Connect(function()
-        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
+        TweenService:Create(self.CloseBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 1,
             BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         }):Play()
-        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
+        TweenService:Create(self.CloseBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             TextColor3 = self.Theme.Error
         }):Play()
     end)
@@ -415,6 +455,7 @@ function Window.new(title, properties)
     self.TabContainer.BackgroundColor3 = self.Theme.Secondary
     self.TabContainer.BorderSizePixel = 0
     self.TabContainer.ClipsDescendants = true
+    self.TabContainer.ZIndex = 1
     CreateRounded(self.TabContainer, 14)
     
     -- Padding for tabs
@@ -435,6 +476,7 @@ function Window.new(title, properties)
     self.TabScroll.ScrollBarImageColor3 = self.Theme.Accent
     self.TabScroll.ScrollBarImageTransparency = 0.6
     self.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    self.TabScroll.ZIndex = 2
     
     self.TabLayout = Instance.new("UIListLayout")
     self.TabLayout.Parent = self.TabScroll
@@ -447,6 +489,7 @@ function Window.new(title, properties)
     self.Content.Size = UDim2.new(1, -160, 1, -44)
     self.Content.Position = UDim2.new(0, 160, 0, 44)
     self.Content.BackgroundTransparency = 1
+    self.Content.ZIndex = 1
     
     local contentPadding = Instance.new("UIPadding")
     contentPadding.Parent = self.Content
@@ -504,7 +547,7 @@ function Window.new(title, properties)
     end)
     
     -- Opening animation
-    TweenService:Create(self.Main, TweenInfoStandard.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    TweenService:Create(self.Main, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Scale = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 0
     }):Play()
@@ -530,12 +573,13 @@ function Window:CreateTab(name)
     button.Font = Enum.Font.GothamMedium
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
+    button.ZIndex = 3
     CreateRounded(button, 8)
     
-    -- Hover effect - FIXED: Removed optional chaining
+    -- Hover effect
     button.MouseEnter:Connect(function()
         if self.CurrentTab and button ~= self.CurrentTab.Button then
-            TweenService:Create(button, TweenInfoStandardFast, {
+            TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 BackgroundTransparency = 0.9,
                 BackgroundColor3 = self.Theme.Tertiary
             }):Play()
@@ -544,7 +588,7 @@ function Window:CreateTab(name)
     
     button.MouseLeave:Connect(function()
         if self.CurrentTab and button ~= self.CurrentTab.Button then
-            TweenService:Create(button, TweenInfoStandardFast, {
+            TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 BackgroundTransparency = 1,
                 BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             }):Play()
@@ -561,6 +605,7 @@ function Window:CreateTab(name)
     tabContent.ScrollBarImageTransparency = 0.6
     tabContent.AutomaticCanvasSize = Enum.AutomaticSize.Y
     tabContent.Visible = false
+    tabContent.ZIndex = 1
     
     local layout = Instance.new("UIListLayout")
     layout.Parent = tabContent
@@ -589,7 +634,7 @@ end
 function Window:SelectTab(tab)
     if self.CurrentTab then
         self.CurrentTab.Content.Visible = false
-        TweenService:Create(self.CurrentTab.Button, TweenInfoStandardFast, {
+        TweenService:Create(self.CurrentTab.Button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 1,
             BackgroundColor3 = Color3.fromRGB(255, 255, 255),
             TextColor3 = self.Theme.TextDim
@@ -598,7 +643,7 @@ function Window:SelectTab(tab)
     
     self.CurrentTab = tab
     tab.Content.Visible = true
-    TweenService:Create(tab.Button, TweenInfoStandardFast, {
+    TweenService:Create(tab.Button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         BackgroundTransparency = 0.2,
         BackgroundColor3 = self.Theme.Accent,
         TextColor3 = self.Theme.Text
@@ -611,25 +656,25 @@ function Window:ToggleMinimize()
     local targetHeight = self.Minimized and 44 or self.Height
     local targetTransparency = self.Minimized and 1 or 0
     
-    TweenService:Create(self.Main, TweenInfoStandard, {
+    TweenService:Create(self.Main, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.fromOffset(self.Width, targetHeight),
     }):Play()
     
     for _, tab in ipairs(self.Tabs) do
         if tab.Content then
-            TweenService:Create(tab.Content, TweenInfoStandard, {
+            TweenService:Create(tab.Content, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 BackgroundTransparency = targetTransparency
             }):Play()
         end
     end
     
-    TweenService:Create(self.TabContainer, TweenInfoStandard, {
+    TweenService:Create(self.TabContainer, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         BackgroundTransparency = targetTransparency
     }):Play()
 end
 
 function Window:Destroy()
-    TweenService:Create(self.Main, TweenInfoStandard.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+    TweenService:Create(self.Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         Scale = UDim2.new(0.9, 0, 0.9, 0),
         BackgroundTransparency = 1
     }):Play()
@@ -649,6 +694,7 @@ function Window:CreateElement(tab, elementType, data)
     frame.BorderSizePixel = 0
     frame.AutomaticSize = data.AutomaticSize or Enum.AutomaticSize.None
     frame.ClipsDescendants = true
+    frame.ZIndex = 1
     
     if data.Rounded ~= false then
         CreateRounded(frame, 10)
@@ -664,6 +710,7 @@ function Window:CreateElement(tab, elementType, data)
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.TextSize = 14
     label.Font = Enum.Font.GothamMedium
+    label.ZIndex = 2
     
     local element = {
         Frame = frame,
@@ -693,6 +740,7 @@ function Window:CreateButton(tab, data)
     button.Font = Enum.Font.GothamBold
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
+    button.ZIndex = 3
     CreateRounded(button, 8)
     
     button.MouseButton1Click:Connect(function()
@@ -706,14 +754,14 @@ function Window:CreateButton(tab, data)
     end)
     
     button.MouseEnter:Connect(function()
-        TweenService:Create(button, TweenInfoStandardFast, {
+        TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundColor3 = self.Theme.AccentHover,
             Size = UDim2.new(0, 114, 1, -10)
         }):Play()
     end)
     
     button.MouseLeave:Connect(function()
-        TweenService:Create(button, TweenInfoStandardFast, {
+        TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundColor3 = self.Theme.Accent,
             Size = UDim2.new(0, 110, 1, -12)
         }):Play()
@@ -747,6 +795,7 @@ function Window:CreateToggle(tab, data)
     toggle.Text = ""
     toggle.BorderSizePixel = 0
     toggle.AutoButtonColor = false
+    toggle.ZIndex = 3
     CreateRounded(toggle, 14)
     
     local indicator = Instance.new("Frame")
@@ -756,6 +805,7 @@ function Window:CreateToggle(tab, data)
     indicator.BackgroundColor3 = self.Theme.TextDim
     indicator.BackgroundTransparency = 0.5
     indicator.BorderSizePixel = 0
+    indicator.ZIndex = 4
     CreateRounded(indicator, 11)
     
     CreateStroke(toggle, self.Theme.BorderLight, 1)
@@ -768,12 +818,12 @@ function Window:CreateToggle(tab, data)
         local targetTransparency = value and 0 or 0.5
         local indicatorColor = value and Color3.fromRGB(255, 255, 255) or self.Theme.TextDim
         
-        TweenService:Create(toggle, TweenInfoStandard, {
+        TweenService:Create(toggle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundColor3 = targetColor,
             BackgroundTransparency = targetTransparency
         }):Play()
         
-        TweenService:Create(indicator, TweenInfoStandard, {
+        TweenService:Create(indicator, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Position = targetPos,
             BackgroundTransparency = value and 0.1 or 0.5,
             BackgroundColor3 = indicatorColor
@@ -832,6 +882,7 @@ function Window:CreateSlider(tab, data)
     valueLabel.TextXAlignment = Enum.TextXAlignment.Right
     valueLabel.TextSize = 14
     valueLabel.Font = Enum.Font.GothamMedium
+    valueLabel.ZIndex = 2
     
     local sliderFrame = Instance.new("Frame")
     sliderFrame.Parent = element.Frame
@@ -839,6 +890,7 @@ function Window:CreateSlider(tab, data)
     sliderFrame.Position = UDim2.new(0, 130, 0.5, -2)
     sliderFrame.BackgroundColor3 = self.Theme.Tertiary
     sliderFrame.BorderSizePixel = 0
+    sliderFrame.ZIndex = 2
     CreateRounded(sliderFrame, 2)
     
     local fill = Instance.new("Frame")
@@ -846,6 +898,7 @@ function Window:CreateSlider(tab, data)
     fill.Size = UDim2.new(0, 0, 1, 0)
     fill.BackgroundColor3 = self.Theme.Accent
     fill.BorderSizePixel = 0
+    fill.ZIndex = 3
     CreateRounded(fill, 2)
     
     -- Slider thumb
@@ -855,7 +908,7 @@ function Window:CreateSlider(tab, data)
     thumb.Position = UDim2.new(0, -9, 0.5, -9)
     thumb.BackgroundColor3 = self.Theme.Accent
     thumb.BorderSizePixel = 0
-    thumb.ZIndex = 2
+    thumb.ZIndex = 4
     CreateRounded(thumb, 9)
     CreateStroke(thumb, Color3.fromRGB(255, 255, 255), 2)
     
@@ -950,19 +1003,20 @@ function Window:CreateTextbox(tab, data)
     textbox.Font = Enum.Font.Gotham
     textbox.TextXAlignment = Enum.TextXAlignment.Left
     textbox.BorderSizePixel = 0
+    textbox.ZIndex = 3
     CreateRounded(textbox, 8)
     
     local stroke = CreateStroke(textbox, self.Theme.BorderLight, 1)
     
     textbox.Focused:Connect(function()
-        TweenService:Create(stroke, TweenInfoStandardFast, {
+        TweenService:Create(stroke, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Color = self.Theme.Accent,
             Thickness = 1.5
         }):Play()
     end)
     
     textbox.FocusLost:Connect(function()
-        TweenService:Create(stroke, TweenInfoStandardFast, {
+        TweenService:Create(stroke, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Color = self.Theme.BorderLight,
             Thickness = 1
         }):Play()
@@ -1015,6 +1069,7 @@ function Window:CreateDropdown(tab, data)
     dropdownBtn.TextXAlignment = Enum.TextXAlignment.Left
     dropdownBtn.BorderSizePixel = 0
     dropdownBtn.AutoButtonColor = false
+    dropdownBtn.ZIndex = 3
     CreateRounded(dropdownBtn, 8)
     CreateStroke(dropdownBtn, self.Theme.BorderLight, 1)
     
@@ -1027,6 +1082,7 @@ function Window:CreateDropdown(tab, data)
     dropdownArrow.TextColor3 = self.Theme.TextDim
     dropdownArrow.TextSize = 12
     dropdownArrow.Font = Enum.Font.Gotham
+    dropdownArrow.ZIndex = 4
     
     local dropdownMenu = Instance.new("Frame")
     dropdownMenu.Parent = element.Frame
@@ -1036,7 +1092,7 @@ function Window:CreateDropdown(tab, data)
     dropdownMenu.BorderSizePixel = 0
     dropdownMenu.ClipsDescendants = true
     dropdownMenu.Visible = false
-    dropdownMenu.ZIndex = 5
+    dropdownMenu.ZIndex = 10
     CreateRounded(dropdownMenu, 8)
     CreateStroke(dropdownMenu, self.Theme.Border, 1)
     
@@ -1076,10 +1132,11 @@ function Window:CreateDropdown(tab, data)
             btn.TextXAlignment = Enum.TextXAlignment.Left
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = false
+            btn.ZIndex = 11
             
             btn.MouseEnter:Connect(function()
                 if btn.Text ~= element.Value then
-                    TweenService:Create(btn, TweenInfoStandardFast, {
+                    TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                         BackgroundTransparency = 0.9,
                         BackgroundColor3 = self.Theme.Tertiary
                     }):Play()
@@ -1087,7 +1144,7 @@ function Window:CreateDropdown(tab, data)
             end)
             
             btn.MouseLeave:Connect(function()
-                TweenService:Create(btn, TweenInfoStandardFast, {
+                TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                     BackgroundTransparency = 1,
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 }):Play()
@@ -1097,7 +1154,7 @@ function Window:CreateDropdown(tab, data)
                 UpdateDropdown(option)
                 element.Open = false
                 dropdownMenu.Visible = false
-                TweenService:Create(dropdownArrow, TweenInfoStandardFast, {
+                TweenService:Create(dropdownArrow, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                     Rotation = 0
                 }):Play()
             end)
@@ -1114,14 +1171,14 @@ function Window:CreateDropdown(tab, data)
         
         if element.Open then
             dropdownMenu.Size = UDim2.new(1, -140, 0, 0)
-            TweenService:Create(dropdownMenu, TweenInfoStandard, {
+            TweenService:Create(dropdownMenu, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Size = UDim2.new(1, -140, 0, #element.Options * 34)
             }):Play()
-            TweenService:Create(dropdownArrow, TweenInfoStandardFast, {
+            TweenService:Create(dropdownArrow, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Rotation = 180
             }):Play()
         else
-            TweenService:Create(dropdownArrow, TweenInfoStandardFast, {
+            TweenService:Create(dropdownArrow, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Rotation = 0
             }):Play()
         end
@@ -1185,6 +1242,7 @@ function Window:CreateDivider(tab)
     line.Position = UDim2.new(0, 12, 0.5, 0)
     line.BackgroundColor3 = self.Theme.Border
     line.BorderSizePixel = 0
+    line.ZIndex = 2
     
     return element
 end
@@ -1218,6 +1276,7 @@ function Library:Destroy()
         NotificationContainer.Parent:Destroy()
         NotificationContainer = nil
     end
+    ActiveNotifications = {}
 end
 
 return Library
