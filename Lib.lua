@@ -1,45 +1,33 @@
 --[[
-    Redev Lib v2.0
+    Redev Lib v3.0
     A premium, lightweight UI library for Roblox
 ]]
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 
 local Library = {}
-Library.Version = "2.0.0"
+Library.Version = "3.0.0"
 
 -- Theme colors
 Library.Theme = {
-    -- Backgrounds
     Background = Color3.fromRGB(10, 10, 10),
     Secondary = Color3.fromRGB(18, 18, 18),
     Tertiary = Color3.fromRGB(26, 26, 26),
     Hover = Color3.fromRGB(35, 35, 35),
-    
-    -- Accent
     Accent = Color3.fromRGB(0, 170, 255),
     AccentHover = Color3.fromRGB(35, 190, 255),
-    AccentDim = Color3.fromRGB(0, 120, 200),
-    
-    -- Text
     Text = Color3.fromRGB(255, 255, 255),
     TextDim = Color3.fromRGB(190, 190, 190),
     TextDark = Color3.fromRGB(130, 130, 130),
-    
-    -- Status Colors
     Success = Color3.fromRGB(46, 204, 113),
     Warning = Color3.fromRGB(241, 196, 15),
     Error = Color3.fromRGB(231, 76, 60),
-    
-    -- Borders
     Border = Color3.fromRGB(40, 40, 40),
     BorderLight = Color3.fromRGB(55, 55, 55),
 }
 
--- Tween info
 local TweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local TweenInfoFast = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
@@ -84,7 +72,6 @@ local function CreateRipple(parent, position)
     ripple.BackgroundTransparency = 0.8
     ripple.BorderSizePixel = 0
     ripple.ZIndex = 10
-    
     CreateRounded(ripple, 5)
     
     TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -168,7 +155,6 @@ function Library:Notify(data)
     stripe.Position = UDim2.new(0, 1, 0, 1)
     stripe.BackgroundColor3 = colors[type] or Library.Theme.Accent
     stripe.BorderSizePixel = 0
-    
     CreateRounded(stripe, 2)
     
     -- Icon
@@ -245,7 +231,6 @@ function Library:Notify(data)
     progress.Position = UDim2.new(0, 0, 1, -2)
     progress.BackgroundColor3 = colors[type] or Library.Theme.Accent
     progress.BorderSizePixel = 0
-    
     CreateRounded(progress, 1)
     
     -- Animate in
@@ -301,9 +286,7 @@ function Window.new(title, properties)
     self.Theme = properties.Theme or Library.Theme
     self.Tabs = {}
     self.CurrentTab = nil
-    self.Visible = true
     self.Minimized = false
-    self.Opening = true
     
     -- Create GUI
     self.ScreenGui = Instance.new("ScreenGui")
@@ -336,11 +319,7 @@ function Window.new(title, properties)
     self.TitleBar.Size = UDim2.new(1, 0, 0, 44)
     self.TitleBar.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
     self.TitleBar.BorderSizePixel = 0
-    
     CreateRounded(self.TitleBar, 14)
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.Parent = self.TitleBar
-    titleCorner.CornerRadius = UDim.new(0, 14)
     
     -- Title bar gradient
     local gradient = Instance.new("UIGradient")
@@ -371,7 +350,7 @@ function Window.new(title, properties)
     self.TitleLabel.Font = Enum.Font.GothamBold
     self.TitleLabel.TextSize = 17
     
-    -- Min/Max buttons with hover effects
+    -- Min/Max buttons
     local btnSize = UDim2.new(0, 28, 0, 28)
     
     self.MinimizeBtn = Instance.new("TextButton")
@@ -436,11 +415,7 @@ function Window.new(title, properties)
     self.TabContainer.BackgroundColor3 = self.Theme.Secondary
     self.TabContainer.BorderSizePixel = 0
     self.TabContainer.ClipsDescendants = true
-    
     CreateRounded(self.TabContainer, 14)
-    local tabCorner = Instance.new("UICorner")
-    tabCorner.Parent = self.TabContainer
-    tabCorner.CornerRadius = UDim.new(0, 14)
     
     -- Padding for tabs
     local padding = Instance.new("UIPadding")
@@ -460,7 +435,6 @@ function Window.new(title, properties)
     self.TabScroll.ScrollBarImageColor3 = self.Theme.Accent
     self.TabScroll.ScrollBarImageTransparency = 0.6
     self.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    self.TabScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     
     self.TabLayout = Instance.new("UIListLayout")
     self.TabLayout.Parent = self.TabScroll
@@ -535,9 +509,6 @@ function Window.new(title, properties)
         BackgroundTransparency = 0
     }):Play()
     
-    task.wait(0.4)
-    self.Opening = false
-    
     return self
 end
 
@@ -546,9 +517,8 @@ function Window:CreateTab(name)
     tab.Name = name
     tab.Window = self
     tab.Elements = {}
-    tab.Buttons = {}
     
-    -- Tab button with modern style
+    -- Tab button
     local button = Instance.new("TextButton")
     button.Parent = self.TabScroll
     button.Size = UDim2.new(1, 0, 0, 36)
@@ -560,12 +530,11 @@ function Window:CreateTab(name)
     button.Font = Enum.Font.GothamMedium
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
-    
     CreateRounded(button, 8)
     
     -- Hover effect
     button.MouseEnter:Connect(function()
-        if button ~= self.CurrentTab.Button then
+        if button ~= self.CurrentTab?.Button then
             TweenService:Create(button, TweenInfoFast, {
                 BackgroundTransparency = 0.9,
                 BackgroundColor3 = self.Theme.Tertiary
@@ -592,7 +561,6 @@ function Window:CreateTab(name)
     tabContent.ScrollBarImageTransparency = 0.6
     tabContent.AutomaticCanvasSize = Enum.AutomaticSize.Y
     tabContent.Visible = false
-    tabContent.CanvasSize = UDim2.new(0, 0, 0, 0)
     
     local layout = Instance.new("UIListLayout")
     layout.Parent = tabContent
@@ -608,7 +576,6 @@ function Window:CreateTab(name)
         self:SelectTab(tab)
     end)
     
-    -- Add to tabs
     table.insert(self.Tabs, tab)
     
     -- Auto select first tab
@@ -648,7 +615,6 @@ function Window:ToggleMinimize()
         Size = UDim2.fromOffset(self.Width, targetHeight),
     }):Play()
     
-    -- Hide content when minimized
     for _, tab in ipairs(self.Tabs) do
         if tab.Content then
             TweenService:Create(tab.Content, TweenInfo, {
@@ -727,7 +693,6 @@ function Window:CreateButton(tab, data)
     button.Font = Enum.Font.GothamBold
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
-    
     CreateRounded(button, 8)
     
     button.MouseButton1Click:Connect(function()
@@ -735,7 +700,6 @@ function Window:CreateButton(tab, data)
             data.Callback()
         end
         
-        -- Ripple effect
         local mousePos = UserInputService:GetMouseLocation()
         local relativePos = button.AbsolutePosition
         CreateRipple(button, Vector2.new(mousePos.X - relativePos.X, mousePos.Y - relativePos.Y))
@@ -783,7 +747,6 @@ function Window:CreateToggle(tab, data)
     toggle.Text = ""
     toggle.BorderSizePixel = 0
     toggle.AutoButtonColor = false
-    
     CreateRounded(toggle, 14)
     
     local indicator = Instance.new("Frame")
@@ -793,10 +756,8 @@ function Window:CreateToggle(tab, data)
     indicator.BackgroundColor3 = self.Theme.TextDim
     indicator.BackgroundTransparency = 0.5
     indicator.BorderSizePixel = 0
-    
     CreateRounded(indicator, 11)
     
-    -- Stroke for toggle
     CreateStroke(toggle, self.Theme.BorderLight, 1)
     
     local function UpdateToggle(value)
@@ -878,7 +839,6 @@ function Window:CreateSlider(tab, data)
     sliderFrame.Position = UDim2.new(0, 130, 0.5, -2)
     sliderFrame.BackgroundColor3 = self.Theme.Tertiary
     sliderFrame.BorderSizePixel = 0
-    
     CreateRounded(sliderFrame, 2)
     
     local fill = Instance.new("Frame")
@@ -886,7 +846,6 @@ function Window:CreateSlider(tab, data)
     fill.Size = UDim2.new(0, 0, 1, 0)
     fill.BackgroundColor3 = self.Theme.Accent
     fill.BorderSizePixel = 0
-    
     CreateRounded(fill, 2)
     
     -- Slider thumb
@@ -897,21 +856,8 @@ function Window:CreateSlider(tab, data)
     thumb.BackgroundColor3 = self.Theme.Accent
     thumb.BorderSizePixel = 0
     thumb.ZIndex = 2
-    
     CreateRounded(thumb, 9)
     CreateStroke(thumb, Color3.fromRGB(255, 255, 255), 2)
-    
-    -- Shadow for thumb
-    local thumbShadow = Instance.new("Frame")
-    thumbShadow.Parent = thumb
-    thumbShadow.Size = UDim2.new(1, 4, 1, 4)
-    thumbShadow.Position = UDim2.new(0, -2, 0, -2)
-    thumbShadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    thumbShadow.BackgroundTransparency = 0.5
-    thumbShadow.BorderSizePixel = 0
-    thumbShadow.ZIndex = -1
-    
-    CreateRounded(thumbShadow, 11)
     
     local function UpdateSlider(value)
         value = math.clamp(value, element.Min, element.Max)
@@ -939,7 +885,6 @@ function Window:CreateSlider(tab, data)
         if data.Callback then data.Callback(element.Value) end
     end
     
-    -- Click on slider bar
     sliderFrame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
@@ -947,7 +892,6 @@ function Window:CreateSlider(tab, data)
         end
     end)
     
-    -- Drag thumb
     thumb.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
@@ -1006,8 +950,8 @@ function Window:CreateTextbox(tab, data)
     textbox.Font = Enum.Font.Gotham
     textbox.TextXAlignment = Enum.TextXAlignment.Left
     textbox.BorderSizePixel = 0
-    
     CreateRounded(textbox, 8)
+    
     local stroke = CreateStroke(textbox, self.Theme.BorderLight, 1)
     
     textbox.Focused:Connect(function()
@@ -1017,7 +961,7 @@ function Window:CreateTextbox(tab, data)
         }):Play()
     end)
     
-    textbox.FocusLost:Connect(function(enterPressed)
+    textbox.FocusLost:Connect(function()
         TweenService:Create(stroke, TweenInfoFast, {
             Color = self.Theme.BorderLight,
             Thickness = 1
@@ -1071,7 +1015,6 @@ function Window:CreateDropdown(tab, data)
     dropdownBtn.TextXAlignment = Enum.TextXAlignment.Left
     dropdownBtn.BorderSizePixel = 0
     dropdownBtn.AutoButtonColor = false
-    
     CreateRounded(dropdownBtn, 8)
     CreateStroke(dropdownBtn, self.Theme.BorderLight, 1)
     
@@ -1094,7 +1037,6 @@ function Window:CreateDropdown(tab, data)
     dropdownMenu.ClipsDescendants = true
     dropdownMenu.Visible = false
     dropdownMenu.ZIndex = 5
-    
     CreateRounded(dropdownMenu, 8)
     CreateStroke(dropdownMenu, self.Theme.Border, 1)
     
@@ -1116,7 +1058,6 @@ function Window:CreateDropdown(tab, data)
     end
     
     local function BuildDropdown()
-        -- Clear old options
         for _, child in ipairs(dropdownMenu:GetChildren()) do
             if child:IsA("TextButton") then
                 child:Destroy()
