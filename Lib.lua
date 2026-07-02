@@ -1,14 +1,31 @@
 --[[
-    Redev Lib v3.0 - FULLY FIXED
+    Redev Lib v3.1 - FULLY FIXED (bugfix pass)
     A premium, lightweight UI library for Roblox
+
+    Changes in this pass (no visual/UI changes made):
+    - Library:Notify() no longer blocks the calling thread (was task.wait()'ing inline)
+    - Fixed a per-click connection leak in window title-bar dragging
+    - Fixed permanent UserInputService connection leaks created by every slider
+    - Added touch support to slider dragging (was mouse-only)
+    - Library:Destroy() now properly tears down every window (and its connections)
+      instead of just deleting the ScreenGui instances
+    - All user Callback invocations are now pcall-protected (SafeCallback)
+    - Fixed `type` shadowing the global `type()` function inside Notify
+    - Added a guard for missing LocalPlayer instead of an obscure WaitForChild hang
 ]]
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    error("[Redev Lib] This library must be run on the client (inside a LocalScript / client-side script).")
+end
+
 local Library = {}
-Library.Version = "3.0.0"
+Library.Version = "3.1.0"
+Library.Windows = {} -- FIXED: track windows so Library:Destroy can clean them up properly
 
 -- Theme colors
 Library.Theme = {
@@ -70,15 +87,27 @@ local function CreateRipple(parent, position)
     ripple.BorderSizePixel = 0
     ripple.ZIndex = 10
     CreateRounded(ripple, 5)
-    
+
     TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, 60, 0, 60),
         Position = UDim2.new(0, position.X - 30, 0, position.Y - 30),
         BackgroundTransparency = 1
     }):Play()
-    
+
     task.wait(0.5)
-    ripple:Destroy()
+    if ripple and ripple.Parent then
+        ripple:Destroy()
+    end
+end
+
+-- FIXED: centralized, pcall-protected callback invocation so a broken user
+-- callback can't silently kill an event connection or crash the UI thread.
+local function SafeCallback(callback, ...)
+    if not callback then return end
+    local ok, err = pcall(callback, ...)
+    if not ok then
+        warn("[Redev Lib] Callback error: " .. tostring(err))
+    end
 end
 
 -- Notification system
@@ -87,15 +116,15 @@ local ActiveNotifications = {}
 
 local function CreateNotificationContainer()
     if NotificationContainer then return NotificationContainer end
-    
-    local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
-    
+
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "RedevNotifications"
     screenGui.ResetOnSpawn = false
     screenGui.IgnoreGuiInset = true
     screenGui.Parent = playerGui
-    
+
     local container = Instance.new("Frame")
     container.Name = "Container"
     container.Parent = screenGui
@@ -103,42 +132,45 @@ local function CreateNotificationContainer()
     container.Position = UDim2.new(1, -400, 0, 10)
     container.BackgroundTransparency = 1
     container.ClipsDescendants = true
-    
+
     local layout = Instance.new("UIListLayout")
     layout.Parent = container
     layout.Padding = UDim.new(0, 10)
     layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
     layout.VerticalAlignment = Enum.VerticalAlignment.Top
     layout.SortOrder = Enum.SortOrder.LayoutOrder
-    
+
     NotificationContainer = container
     return container
 end
 
 -- Custom notification function
+-- FIXED: this used to task.wait() for the full notification duration before
+-- returning, blocking whatever script called it. The setup/animation/auto-close
+-- logic now runs in its own thread via task.spawn, so this returns immediately.
 function Library:Notify(data)
     data = data or {}
     local title = data.Title or "Notification"
     local content = data.Content or ""
     local duration = data.Duration or 4
-    local type = data.Type or "info"
-    
+    local notifType = data.Type or "info" -- FIXED: renamed from `type`, which shadowed the Lua global type()
+
     local icons = {
         info = "ℹ",
         success = "✔",
         warning = "⚠",
         error = "✖"
     }
-    
+
     local colors = {
         info = Library.Theme.Accent,
         success = Library.Theme.Success,
         warning = Library.Theme.Warning,
         error = Library.Theme.Error
     }
-    
+
     local container = CreateNotificationContainer()
-    
+
     -- Main notification frame
     local notification = Instance.new("Frame")
     notification.Parent = container
@@ -148,31 +180,31 @@ function Library:Notify(data)
     notification.ClipsDescendants = true
     notification.AutomaticSize = Enum.AutomaticSize.Y
     notification.ZIndex = 2
-    
+
     CreateRounded(notification, 10)
-    CreateStroke(notification, colors[type] or Library.Theme.Accent, 1.5)
-    
+    CreateStroke(notification, colors[notifType] or Library.Theme.Accent, 1.5)
+
     -- Color stripe on the left
     local stripe = Instance.new("Frame")
     stripe.Parent = notification
     stripe.Size = UDim2.new(0, 4, 1, -2)
     stripe.Position = UDim2.new(0, 1, 0, 1)
-    stripe.BackgroundColor3 = colors[type] or Library.Theme.Accent
+    stripe.BackgroundColor3 = colors[notifType] or Library.Theme.Accent
     stripe.BorderSizePixel = 0
     CreateRounded(stripe, 2)
-    
+
     -- Icon
     local iconLabel = Instance.new("TextLabel")
     iconLabel.Parent = notification
     iconLabel.Size = UDim2.new(0, 30, 0, 30)
     iconLabel.Position = UDim2.new(0, 10, 0, 8)
     iconLabel.BackgroundTransparency = 1
-    iconLabel.Text = icons[type] or "ℹ"
-    iconLabel.TextColor3 = colors[type] or Library.Theme.Accent
+    iconLabel.Text = icons[notifType] or "ℹ"
+    iconLabel.TextColor3 = colors[notifType] or Library.Theme.Accent
     iconLabel.TextSize = 18
     iconLabel.Font = Enum.Font.GothamBold
     iconLabel.TextXAlignment = Enum.TextXAlignment.Center
-    
+
     -- Title
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Parent = notification
@@ -185,7 +217,7 @@ function Library:Notify(data)
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 15
     titleLabel.AutomaticSize = Enum.AutomaticSize.Y
-    
+
     -- Content
     local contentLabel = Instance.new("TextLabel")
     contentLabel.Parent = notification
@@ -200,7 +232,7 @@ function Library:Notify(data)
     contentLabel.TextSize = 13
     contentLabel.AutomaticSize = Enum.AutomaticSize.Y
     contentLabel.LayoutOrder = 1
-    
+
     -- Close button
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = notification
@@ -213,81 +245,87 @@ function Library:Notify(data)
     closeBtn.Font = Enum.Font.Gotham
     closeBtn.BorderSizePixel = 0
     closeBtn.ZIndex = 3
-    
+
     closeBtn.MouseEnter:Connect(function()
         TweenService:Create(closeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             TextColor3 = Library.Theme.Text
         }):Play()
     end)
-    
+
     closeBtn.MouseLeave:Connect(function()
         TweenService:Create(closeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             TextColor3 = Library.Theme.TextDark
         }):Play()
     end)
-    
+
     local notificationClosed = false
-    
+
     closeBtn.MouseButton1Click:Connect(function()
         if not notificationClosed then
             notificationClosed = true
             Library:CloseNotification(notification)
         end
     end)
-    
+
     -- Progress bar
     local progress = Instance.new("Frame")
     progress.Parent = notification
     progress.Size = UDim2.new(1, 0, 0, 2)
     progress.Position = UDim2.new(0, 0, 1, -2)
-    progress.BackgroundColor3 = colors[type] or Library.Theme.Accent
+    progress.BackgroundColor3 = colors[notifType] or Library.Theme.Accent
     progress.BorderSizePixel = 0
     CreateRounded(progress, 1)
-    
+
     -- Store notification data
     local notificationData = {
         Frame = notification,
         Progress = progress,
         Duration = duration,
-        Type = type,
+        Type = notifType,
         Title = title,
         Content = content,
         IsClosed = false
     }
-    
+
     table.insert(ActiveNotifications, notificationData)
-    
-    -- Animate in
-    notification.Size = UDim2.new(1, 0, 0, 0)
-    notification.BackgroundTransparency = 1
-    
-    task.wait(0.05)
-    
-    local targetHeight = titleLabel.AbsoluteSize.Y + contentLabel.AbsoluteSize.Y + 25
-    TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Size = UDim2.new(1, 0, 0, targetHeight),
-        BackgroundTransparency = 0
-    }):Play()
-    
-    -- Animate progress bar
-    if duration > 0 then
-        TweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
-            Size = UDim2.new(0, 0, 0, 2)
+
+    -- FIXED: run the animate-in / auto-close sequence on its own thread so
+    -- Library:Notify() returns immediately instead of blocking for `duration` seconds.
+    task.spawn(function()
+        -- Animate in
+        notification.Size = UDim2.new(1, 0, 0, 0)
+        notification.BackgroundTransparency = 1
+
+        task.wait(0.05)
+
+        if not notification or not notification.Parent then return end
+
+        local targetHeight = titleLabel.AbsoluteSize.Y + contentLabel.AbsoluteSize.Y + 25
+        TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(1, 0, 0, targetHeight),
+            BackgroundTransparency = 0
         }):Play()
-        
-        task.wait(duration)
-        if not notificationClosed and notification and notification.Parent then
-            notificationClosed = true
-            Library:CloseNotification(notification)
+
+        -- Animate progress bar
+        if duration > 0 then
+            TweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+                Size = UDim2.new(0, 0, 0, 2)
+            }):Play()
+
+            task.wait(duration)
+            if not notificationClosed and notification and notification.Parent then
+                notificationClosed = true
+                Library:CloseNotification(notification)
+            end
         end
-    end
-    
+    end)
+
     return notificationData
 end
 
 function Library:CloseNotification(notification)
     if not notification then return end
-    
+
     -- Find and remove from active list safely
     for i = #ActiveNotifications, 1, -1 do
         if ActiveNotifications[i].Frame == notification then
@@ -296,12 +334,12 @@ function Library:CloseNotification(notification)
             break
         end
     end
-    
+
     TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         Size = UDim2.new(1, 0, 0, 0),
         BackgroundTransparency = 1
     }):Play()
-    
+
     task.wait(0.3)
     if notification and notification.Parent then
         notification:Destroy()
@@ -326,7 +364,7 @@ Window.__index = Window
 
 function Window.new(title, properties)
     properties = properties or {}
-    
+
     local self = setmetatable({}, Window)
     self.Title = title or "Redev Lib"
     self.Width = properties.Width or 650
@@ -337,10 +375,10 @@ function Window.new(title, properties)
     self.Minimized = false
     self.Connections = {}
     self.Destroyed = false
-    
+
     -- Get PlayerGui safely
-    local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
-    
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
     -- Create GUI
     self.ScreenGui = Instance.new("ScreenGui")
     self.ScreenGui.Name = "RedevUI"
@@ -348,7 +386,7 @@ function Window.new(title, properties)
     self.ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     self.ScreenGui.IgnoreGuiInset = true
     self.ScreenGui.Parent = playerGui
-    
+
     -- Main frame
     self.Main = Instance.new("Frame")
     self.Main.Parent = self.ScreenGui
@@ -359,19 +397,19 @@ function Window.new(title, properties)
     self.Main.BorderSizePixel = 0
     self.Main.ClipsDescendants = true
     self.Main.ZIndex = 1
-    
-    -- UIScale for opening animation (FIXED)
+
+    -- UIScale for opening animation
     self.UIScale = Instance.new("UIScale")
     self.UIScale.Parent = self.Main
     self.UIScale.Scale = 0.9
-    
+
     -- Opening animation
     self.Main.BackgroundTransparency = 1
-    
+
     CreateShadow(self.Main)
     CreateRounded(self.Main, 14)
     CreateStroke(self.Main, self.Theme.Border, 1)
-    
+
     -- Title bar
     self.TitleBar = Instance.new("Frame")
     self.TitleBar.Parent = self.Main
@@ -380,7 +418,7 @@ function Window.new(title, properties)
     self.TitleBar.BorderSizePixel = 0
     self.TitleBar.ZIndex = 2
     CreateRounded(self.TitleBar, 14)
-    
+
     -- Title bar gradient
     local gradient = Instance.new("UIGradient")
     gradient.Parent = self.TitleBar
@@ -388,7 +426,7 @@ function Window.new(title, properties)
         ColorSequenceKeypoint.new(0, Color3.fromRGB(14, 14, 14)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 20))
     })
-    
+
     -- Title bar divider
     local divider = Instance.new("Frame")
     divider.Parent = self.TitleBar
@@ -398,7 +436,7 @@ function Window.new(title, properties)
     divider.BackgroundColor3 = self.Theme.Border
     divider.BorderSizePixel = 0
     divider.ZIndex = 3
-    
+
     -- Title text
     self.TitleLabel = Instance.new("TextLabel")
     self.TitleLabel.Parent = self.TitleBar
@@ -411,10 +449,10 @@ function Window.new(title, properties)
     self.TitleLabel.Font = Enum.Font.GothamBold
     self.TitleLabel.TextSize = 17
     self.TitleLabel.ZIndex = 4
-    
+
     -- Min/Max buttons
     local btnSize = UDim2.new(0, 28, 0, 28)
-    
+
     self.MinimizeBtn = Instance.new("TextButton")
     self.MinimizeBtn.Parent = self.TitleBar
     self.MinimizeBtn.Size = btnSize
@@ -427,19 +465,19 @@ function Window.new(title, properties)
     self.MinimizeBtn.BorderSizePixel = 0
     self.MinimizeBtn.ZIndex = 4
     self.MinimizeBtn.AutoButtonColor = false
-    
+
     self.MinimizeBtn.MouseEnter:Connect(function()
         TweenService:Create(self.MinimizeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 0.9
         }):Play()
     end)
-    
+
     self.MinimizeBtn.MouseLeave:Connect(function()
         TweenService:Create(self.MinimizeBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 1
         }):Play()
     end)
-    
+
     self.CloseBtn = Instance.new("TextButton")
     self.CloseBtn.Parent = self.TitleBar
     self.CloseBtn.Size = btnSize
@@ -452,7 +490,7 @@ function Window.new(title, properties)
     self.CloseBtn.BorderSizePixel = 0
     self.CloseBtn.ZIndex = 4
     self.CloseBtn.AutoButtonColor = false
-    
+
     self.CloseBtn.MouseEnter:Connect(function()
         TweenService:Create(self.CloseBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 0.9,
@@ -462,7 +500,7 @@ function Window.new(title, properties)
             TextColor3 = Color3.fromRGB(255, 255, 255)
         }):Play()
     end)
-    
+
     self.CloseBtn.MouseLeave:Connect(function()
         TweenService:Create(self.CloseBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = 1,
@@ -472,7 +510,7 @@ function Window.new(title, properties)
             TextColor3 = self.Theme.Error
         }):Play()
     end)
-    
+
     -- Tabs container
     self.TabContainer = Instance.new("Frame")
     self.TabContainer.Parent = self.Main
@@ -483,7 +521,7 @@ function Window.new(title, properties)
     self.TabContainer.ClipsDescendants = true
     self.TabContainer.ZIndex = 1
     CreateRounded(self.TabContainer, 14)
-    
+
     -- Padding for tabs
     local padding = Instance.new("UIPadding")
     padding.Parent = self.TabContainer
@@ -491,7 +529,7 @@ function Window.new(title, properties)
     padding.PaddingBottom = UDim.new(0, 10)
     padding.PaddingLeft = UDim.new(0, 8)
     padding.PaddingRight = UDim.new(0, 8)
-    
+
     -- Tab scroll frame
     self.TabScroll = Instance.new("ScrollingFrame")
     self.TabScroll.Parent = self.TabContainer
@@ -503,12 +541,12 @@ function Window.new(title, properties)
     self.TabScroll.ScrollBarImageTransparency = 0.6
     self.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     self.TabScroll.ZIndex = 2
-    
+
     self.TabLayout = Instance.new("UIListLayout")
     self.TabLayout.Parent = self.TabScroll
     self.TabLayout.Padding = UDim.new(0, 4)
     self.TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    
+
     -- Content container with padding
     self.Content = Instance.new("Frame")
     self.Content.Parent = self.Main
@@ -516,46 +554,44 @@ function Window.new(title, properties)
     self.Content.Position = UDim2.new(0, 160, 0, 44)
     self.Content.BackgroundTransparency = 1
     self.Content.ZIndex = 1
-    
+
     local contentPadding = Instance.new("UIPadding")
     contentPadding.Parent = self.Content
     contentPadding.PaddingLeft = UDim.new(0, 16)
     contentPadding.PaddingRight = UDim.new(0, 16)
     contentPadding.PaddingTop = UDim.new(0, 16)
     contentPadding.PaddingBottom = UDim.new(0, 16)
-    
+
     -- Dragging
     self.Dragging = false
     self.DragInput = nil
     self.DragStart = nil
     self.StartPos = nil
-    
+
     -- Events
     self.MinimizeBtn.MouseButton1Click:Connect(function()
         self:ToggleMinimize()
     end)
-    
+
     self.CloseBtn.MouseButton1Click:Connect(function()
         self:Destroy()
     end)
-    
-    -- Dragging logic with connection tracking (FIXED)
+
+    -- Dragging logic with connection tracking
+    -- FIXED: the previous version connected a brand-new `input.Changed` listener
+    -- inside InputBegan on every single click/tap, and never disconnected any of
+    -- them - a permanent, ever-growing connection leak. Dragging now stops via a
+    -- single tracked UserInputService.InputEnded connection instead.
     local dragConnection1 = self.TitleBar.InputBegan:Connect(function(input)
         if self.Destroyed then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             self.Dragging = true
             self.DragStart = input.Position
             self.StartPos = self.Main.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    self.Dragging = false
-                end
-            end)
         end
     end)
     table.insert(self.Connections, dragConnection1)
-    
+
     local dragConnection2 = self.TitleBar.InputChanged:Connect(function(input)
         if self.Destroyed then return end
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
@@ -563,7 +599,7 @@ function Window.new(title, properties)
         end
     end)
     table.insert(self.Connections, dragConnection2)
-    
+
     local dragConnection3 = UserInputService.InputChanged:Connect(function(input)
         if self.Destroyed then return end
         if input == self.DragInput and self.Dragging then
@@ -577,16 +613,26 @@ function Window.new(title, properties)
         end
     end)
     table.insert(self.Connections, dragConnection3)
-    
-    -- Opening animation (FIXED - using UIScale)
+
+    -- FIXED: replaces the old per-click input.Changed leak; a single tracked
+    -- connection that stops dragging when the mouse/touch input ends.
+    local dragConnection4 = UserInputService.InputEnded:Connect(function(input)
+        if self.Destroyed then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            self.Dragging = false
+        end
+    end)
+    table.insert(self.Connections, dragConnection4)
+
+    -- Opening animation (using UIScale)
     TweenService:Create(self.UIScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Scale = 1
     }):Play()
-    
+
     TweenService:Create(self.Main, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         BackgroundTransparency = 0
     }):Play()
-    
+
     return self
 end
 
@@ -595,7 +641,7 @@ function Window:CreateTab(name)
     tab.Name = name
     tab.Window = self
     tab.Elements = {}
-    
+
     -- Tab button
     local button = Instance.new("TextButton")
     button.Parent = self.TabScroll
@@ -610,7 +656,7 @@ function Window:CreateTab(name)
     button.AutoButtonColor = false
     button.ZIndex = 3
     CreateRounded(button, 8)
-    
+
     -- Hover effect
     button.MouseEnter:Connect(function()
         if self.CurrentTab and button ~= self.CurrentTab.Button then
@@ -620,7 +666,7 @@ function Window:CreateTab(name)
             }):Play()
         end
     end)
-    
+
     button.MouseLeave:Connect(function()
         if self.CurrentTab and button ~= self.CurrentTab.Button then
             TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -629,7 +675,7 @@ function Window:CreateTab(name)
             }):Play()
         end
     end)
-    
+
     local tabContent = Instance.new("ScrollingFrame")
     tabContent.Parent = self.Content
     tabContent.Size = UDim2.new(1, 0, 1, 0)
@@ -641,28 +687,28 @@ function Window:CreateTab(name)
     tabContent.AutomaticCanvasSize = Enum.AutomaticSize.Y
     tabContent.Visible = false
     tabContent.ZIndex = 1
-    
+
     local layout = Instance.new("UIListLayout")
     layout.Parent = tabContent
     layout.Padding = UDim.new(0, 10)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
-    
+
     tab.Content = tabContent
     tab.Button = button
     tab.Layout = layout
-    
+
     -- Select tab
     button.MouseButton1Click:Connect(function()
         self:SelectTab(tab)
     end)
-    
+
     table.insert(self.Tabs, tab)
-    
+
     -- Auto select first tab
     if not self.CurrentTab then
         self:SelectTab(tab)
     end
-    
+
     return tab
 end
 
@@ -675,7 +721,7 @@ function Window:SelectTab(tab)
             TextColor3 = self.Theme.TextDim
         }):Play()
     end
-    
+
     self.CurrentTab = tab
     tab.Content.Visible = true
     TweenService:Create(tab.Button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -687,14 +733,14 @@ end
 
 function Window:ToggleMinimize()
     self.Minimized = not self.Minimized
-    
+
     local targetHeight = self.Minimized and 44 or self.Height
     local targetTransparency = self.Minimized and 1 or 0
-    
+
     TweenService:Create(self.Main, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.fromOffset(self.Width, targetHeight),
     }):Play()
-    
+
     for _, tab in ipairs(self.Tabs) do
         if tab.Content then
             TweenService:Create(tab.Content, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -702,7 +748,7 @@ function Window:ToggleMinimize()
             }):Play()
         end
     end
-    
+
     TweenService:Create(self.TabContainer, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         BackgroundTransparency = targetTransparency
     }):Play()
@@ -711,22 +757,32 @@ end
 function Window:Destroy()
     if self.Destroyed then return end
     self.Destroyed = true
-    
-    -- Disconnect all connections (FIXED)
+
+    -- Disconnect all connections
     for _, connection in ipairs(self.Connections) do
-        connection:Disconnect()
+        if connection.Connected then
+            connection:Disconnect()
+        end
     end
     self.Connections = {}
-    
-    -- Animate out using UIScale (FIXED)
+
+    -- FIXED: remove this window from the library-level tracking table
+    for i = #Library.Windows, 1, -1 do
+        if Library.Windows[i] == self then
+            table.remove(Library.Windows, i)
+            break
+        end
+    end
+
+    -- Animate out using UIScale
     TweenService:Create(self.UIScale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         Scale = 0.9
     }):Play()
-    
+
     TweenService:Create(self.Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         BackgroundTransparency = 1
     }):Play()
-    
+
     task.wait(0.3)
     if self.ScreenGui then
         self.ScreenGui:Destroy()
@@ -736,7 +792,7 @@ end
 -- Element creation functions
 function Window:CreateElement(tab, elementType, data)
     data = data or {}
-    
+
     local frame = Instance.new("Frame")
     frame.Parent = tab.Content
     frame.Size = UDim2.new(1, 0, 0, data.Height or 38)
@@ -745,11 +801,11 @@ function Window:CreateElement(tab, elementType, data)
     frame.AutomaticSize = data.AutomaticSize or Enum.AutomaticSize.None
     frame.ClipsDescendants = true
     frame.ZIndex = 1
-    
+
     if data.Rounded ~= false then
         CreateRounded(frame, 10)
     end
-    
+
     local label = Instance.new("TextLabel")
     label.Parent = frame
     label.Size = UDim2.new(0, 120, 1, 0)
@@ -761,7 +817,7 @@ function Window:CreateElement(tab, elementType, data)
     label.TextSize = 14
     label.Font = Enum.Font.GothamMedium
     label.ZIndex = 2
-    
+
     local element = {
         Frame = frame,
         Label = label,
@@ -770,15 +826,15 @@ function Window:CreateElement(tab, elementType, data)
         Tab = tab,
         Window = self
     }
-    
+
     table.insert(tab.Elements, element)
-    
+
     return element
 end
 
 function Window:CreateButton(tab, data)
     local element = self:CreateElement(tab, "Button", data)
-    
+
     local button = Instance.new("TextButton")
     button.Parent = element.Frame
     button.Size = UDim2.new(0, 110, 1, -12)
@@ -792,50 +848,46 @@ function Window:CreateButton(tab, data)
     button.AutoButtonColor = false
     button.ZIndex = 3
     CreateRounded(button, 8)
-    
+
     button.MouseButton1Click:Connect(function()
-        if data.Callback then
-            data.Callback()
-        end
-        
+        SafeCallback(data.Callback)
+
         local mousePos = UserInputService:GetMouseLocation()
         local relativePos = button.AbsolutePosition
         CreateRipple(button, Vector2.new(mousePos.X - relativePos.X, mousePos.Y - relativePos.Y))
     end)
-    
+
     button.MouseEnter:Connect(function()
         TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundColor3 = self.Theme.AccentHover,
             Size = UDim2.new(0, 114, 1, -10)
         }):Play()
     end)
-    
+
     button.MouseLeave:Connect(function()
         TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundColor3 = self.Theme.Accent,
             Size = UDim2.new(0, 110, 1, -12)
         }):Play()
     end)
-    
+
     element.Button = button
-    
+
     function element:SetText(text)
         button.Text = text
     end
-    
+
     function element:Fire()
-        if data.Callback then
-            data.Callback()
-        end
+        SafeCallback(data.Callback)
     end
-    
+
     return element
 end
 
 function Window:CreateToggle(tab, data)
     local element = self:CreateElement(tab, "Toggle", data)
     element.Value = data.Default or false
-    
+
     local toggle = Instance.new("TextButton")
     toggle.Parent = element.Frame
     toggle.Size = UDim2.new(0, 54, 0, 28)
@@ -847,7 +899,7 @@ function Window:CreateToggle(tab, data)
     toggle.AutoButtonColor = false
     toggle.ZIndex = 3
     CreateRounded(toggle, 14)
-    
+
     local indicator = Instance.new("Frame")
     indicator.Parent = toggle
     indicator.Size = UDim2.new(0, 22, 0, 22)
@@ -857,53 +909,49 @@ function Window:CreateToggle(tab, data)
     indicator.BorderSizePixel = 0
     indicator.ZIndex = 4
     CreateRounded(indicator, 11)
-    
+
     CreateStroke(toggle, self.Theme.BorderLight, 1)
-    
+
     local function UpdateToggle(value)
         element.Value = value
-        
+
         local targetColor = value and self.Theme.Accent or self.Theme.Tertiary
         local targetPos = value and UDim2.new(0, 29, 0.5, -11) or UDim2.new(0, 3, 0.5, -11)
         local targetTransparency = value and 0 or 0.5
         local indicatorColor = value and Color3.fromRGB(255, 255, 255) or self.Theme.TextDim
-        
+
         TweenService:Create(toggle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundColor3 = targetColor,
             BackgroundTransparency = targetTransparency
         }):Play()
-        
+
         TweenService:Create(indicator, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Position = targetPos,
             BackgroundTransparency = value and 0.1 or 0.5,
             BackgroundColor3 = indicatorColor
         }):Play()
     end
-    
+
     toggle.MouseButton1Click:Connect(function()
         UpdateToggle(not element.Value)
-        if data.Callback then
-            data.Callback(element.Value)
-        end
+        SafeCallback(data.Callback, element.Value)
     end)
-    
+
     UpdateToggle(element.Value)
-    
+
     function element:Get()
         return element.Value
     end
-    
+
     function element:Set(value)
         UpdateToggle(value)
-        if data.Callback then
-            data.Callback(value)
-        end
+        SafeCallback(data.Callback, value)
     end
-    
+
     function element:Toggle()
         self:Set(not element.Value)
     end
-    
+
     function element:OnChanged(callback)
         local oldCallback = data.Callback
         data.Callback = function(value)
@@ -911,7 +959,7 @@ function Window:CreateToggle(tab, data)
             callback(value)
         end
     end
-    
+
     return element
 end
 
@@ -921,12 +969,12 @@ function Window:CreateSlider(tab, data)
     element.Min = data.Min or 0
     element.Max = data.Max or 100
     element.Precision = data.Precision or 0
-    
-    -- FIXED: Prevent divide by zero
+
+    -- Prevent divide by zero
     if element.Max == element.Min then
         element.Max = element.Min + 1
     end
-    
+
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Parent = element.Frame
     valueLabel.Size = UDim2.new(0, 50, 1, 0)
@@ -938,7 +986,7 @@ function Window:CreateSlider(tab, data)
     valueLabel.TextSize = 14
     valueLabel.Font = Enum.Font.GothamMedium
     valueLabel.ZIndex = 2
-    
+
     local sliderFrame = Instance.new("Frame")
     sliderFrame.Parent = element.Frame
     sliderFrame.Size = UDim2.new(1, -200, 0, 4)
@@ -947,7 +995,7 @@ function Window:CreateSlider(tab, data)
     sliderFrame.BorderSizePixel = 0
     sliderFrame.ZIndex = 2
     CreateRounded(sliderFrame, 2)
-    
+
     local fill = Instance.new("Frame")
     fill.Parent = sliderFrame
     fill.Size = UDim2.new(0, 0, 1, 0)
@@ -955,7 +1003,7 @@ function Window:CreateSlider(tab, data)
     fill.BorderSizePixel = 0
     fill.ZIndex = 3
     CreateRounded(fill, 2)
-    
+
     -- Slider thumb
     local thumb = Instance.new("Frame")
     thumb.Parent = sliderFrame
@@ -966,26 +1014,26 @@ function Window:CreateSlider(tab, data)
     thumb.ZIndex = 4
     CreateRounded(thumb, 9)
     CreateStroke(thumb, Color3.fromRGB(255, 255, 255), 2)
-    
+
     local function UpdateSlider(value)
         value = math.clamp(value, element.Min, element.Max)
         if element.Precision > 0 then
             value = math.round(value / element.Precision) * element.Precision
         end
         element.Value = value
-        
+
         local percent = (value - element.Min) / (element.Max - element.Min)
         fill.Size = UDim2.new(percent, 0, 1, 0)
         thumb.Position = UDim2.new(percent, -9, 0.5, -9)
         valueLabel.Text = tostring(value)
     end
-    
+
     UpdateSlider(element.Value)
-    
+
     local dragging = false
-    
+
     local function HandleSliderInput(input)
-        -- FIXED: Proper AbsoluteSize check
+        -- Proper AbsoluteSize check to avoid a divide-by-zero / NaN percent
         if sliderFrame.AbsoluteSize.X <= 0 then
             return
         end
@@ -993,44 +1041,52 @@ function Window:CreateSlider(tab, data)
         local percent = math.clamp(relativeX / sliderFrame.AbsoluteSize.X, 0, 1)
         local value = element.Min + (element.Max - element.Min) * percent
         UpdateSlider(value)
-        if data.Callback then data.Callback(element.Value) end
+        SafeCallback(data.Callback, element.Value)
     end
-    
+
+    -- FIXED: added Touch support (was mouse-only, inconsistent with the rest of the lib)
     sliderFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             HandleSliderInput(input)
         end
     end)
-    
+
     thumb.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             HandleSliderInput(input)
         end
     end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+
+    -- FIXED: these two UserInputService connections used to be created fresh for
+    -- every slider and never disconnected - a permanent leak that persisted even
+    -- after the window/slider was destroyed. They're now tracked in
+    -- Window.Connections and cleaned up in Window:Destroy().
+    local sliderInputChanged = UserInputService.InputChanged:Connect(function(input)
+        if self.Destroyed then return end
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             HandleSliderInput(input)
         end
     end)
-    
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    table.insert(self.Connections, sliderInputChanged)
+
+    local sliderInputEnded = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
-    
+    table.insert(self.Connections, sliderInputEnded)
+
     function element:Get()
         return element.Value
     end
-    
+
     function element:Set(value)
         UpdateSlider(value)
-        if data.Callback then data.Callback(element.Value) end
+        SafeCallback(data.Callback, element.Value)
     end
-    
+
     function element:OnChanged(callback)
         local oldCallback = data.Callback
         data.Callback = function(value)
@@ -1038,7 +1094,7 @@ function Window:CreateSlider(tab, data)
             callback(value)
         end
     end
-    
+
     return element
 end
 
@@ -1046,7 +1102,7 @@ function Window:CreateTextbox(tab, data)
     local element = self:CreateElement(tab, "Textbox", data)
     element.Value = data.Default or ""
     element.Placeholder = data.Placeholder or "Enter text..."
-    
+
     local textbox = Instance.new("TextBox")
     textbox.Parent = element.Frame
     textbox.Size = UDim2.new(1, -140, 1, -12)
@@ -1063,40 +1119,40 @@ function Window:CreateTextbox(tab, data)
     textbox.BorderSizePixel = 0
     textbox.ZIndex = 3
     CreateRounded(textbox, 8)
-    
+
     local stroke = CreateStroke(textbox, self.Theme.BorderLight, 1)
-    
+
     textbox.Focused:Connect(function()
         TweenService:Create(stroke, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Color = self.Theme.Accent,
             Thickness = 1.5
         }):Play()
     end)
-    
+
     textbox.FocusLost:Connect(function()
         TweenService:Create(stroke, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Color = self.Theme.BorderLight,
             Thickness = 1
         }):Play()
-        
+
         element.Value = textbox.Text
-        if data.Callback then data.Callback(textbox.Text) end
+        SafeCallback(data.Callback, textbox.Text)
     end)
-    
+
     textbox:GetPropertyChangedSignal("Text"):Connect(function()
         element.Value = textbox.Text
     end)
-    
+
     function element:Get()
         return element.Value
     end
-    
+
     function element:Set(value)
         textbox.Text = value
         element.Value = value
-        if data.Callback then data.Callback(value) end
+        SafeCallback(data.Callback, value)
     end
-    
+
     function element:OnChanged(callback)
         local oldCallback = data.Callback
         data.Callback = function(value)
@@ -1104,7 +1160,7 @@ function Window:CreateTextbox(tab, data)
             callback(value)
         end
     end
-    
+
     return element
 end
 
@@ -1113,7 +1169,7 @@ function Window:CreateDropdown(tab, data)
     element.Options = data.Options or {}
     element.Value = data.Default or element.Options[1] or ""
     element.Open = false
-    
+
     local dropdownBtn = Instance.new("TextButton")
     dropdownBtn.Parent = element.Frame
     dropdownBtn.Size = UDim2.new(1, -140, 1, -12)
@@ -1130,7 +1186,7 @@ function Window:CreateDropdown(tab, data)
     dropdownBtn.ZIndex = 3
     CreateRounded(dropdownBtn, 8)
     CreateStroke(dropdownBtn, self.Theme.BorderLight, 1)
-    
+
     local dropdownArrow = Instance.new("TextLabel")
     dropdownArrow.Parent = dropdownBtn
     dropdownArrow.Size = UDim2.new(0, 25, 1, 0)
@@ -1141,7 +1197,7 @@ function Window:CreateDropdown(tab, data)
     dropdownArrow.TextSize = 12
     dropdownArrow.Font = Enum.Font.Gotham
     dropdownArrow.ZIndex = 4
-    
+
     local dropdownMenu = Instance.new("Frame")
     dropdownMenu.Parent = element.Frame
     dropdownMenu.Size = UDim2.new(1, -140, 0, 0)
@@ -1153,31 +1209,31 @@ function Window:CreateDropdown(tab, data)
     dropdownMenu.ZIndex = 10
     CreateRounded(dropdownMenu, 8)
     CreateStroke(dropdownMenu, self.Theme.Border, 1)
-    
+
     local dropdownList = Instance.new("UIListLayout")
     dropdownList.Parent = dropdownMenu
     dropdownList.Padding = UDim.new(0, 2)
-    
+
     local function UpdateDropdown(value)
         element.Value = value
         dropdownBtn.Text = value
-        
+
         for _, child in ipairs(dropdownMenu:GetChildren()) do
             if child:IsA("TextButton") then
                 child.TextColor3 = child.Text == value and self.Theme.Accent or self.Theme.TextDim
             end
         end
-        
-        if data.Callback then data.Callback(value) end
+
+        SafeCallback(data.Callback, value)
     end
-    
+
     local function BuildDropdown()
         for _, child in ipairs(dropdownMenu:GetChildren()) do
             if child:IsA("TextButton") then
                 child:Destroy()
             end
         end
-        
+
         for _, option in ipairs(element.Options) do
             local btn = Instance.new("TextButton")
             btn.Parent = dropdownMenu
@@ -1191,7 +1247,7 @@ function Window:CreateDropdown(tab, data)
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = false
             btn.ZIndex = 11
-            
+
             btn.MouseEnter:Connect(function()
                 if btn.Text ~= element.Value then
                     TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -1200,18 +1256,17 @@ function Window:CreateDropdown(tab, data)
                     }):Play()
                 end
             end)
-            
+
             btn.MouseLeave:Connect(function()
                 TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                     BackgroundTransparency = 1,
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 }):Play()
             end)
-            
+
             btn.MouseButton1Click:Connect(function()
                 UpdateDropdown(option)
                 element.Open = false
-                -- FIXED: Animate dropdown closed
                 TweenService:Create(dropdownMenu, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                     Size = UDim2.new(1, -140, 0, 0)
                 }):Play()
@@ -1222,16 +1277,16 @@ function Window:CreateDropdown(tab, data)
                 }):Play()
             end)
         end
-        
+
         dropdownMenu.Size = UDim2.new(1, -140, 0, #element.Options * 34)
     end
-    
+
     BuildDropdown()
-    
+
     dropdownBtn.MouseButton1Click:Connect(function()
         element.Open = not element.Open
         dropdownMenu.Visible = element.Open
-        
+
         if element.Open then
             dropdownMenu.Size = UDim2.new(1, -140, 0, 0)
             TweenService:Create(dropdownMenu, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -1241,7 +1296,6 @@ function Window:CreateDropdown(tab, data)
                 Rotation = 180
             }):Play()
         else
-            -- FIXED: Animate dropdown closed
             TweenService:Create(dropdownMenu, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Size = UDim2.new(1, -140, 0, 0)
             }):Play()
@@ -1252,17 +1306,17 @@ function Window:CreateDropdown(tab, data)
             }):Play()
         end
     end)
-    
+
     function element:Get()
         return element.Value
     end
-    
+
     function element:Set(value)
         if table.find(element.Options, value) then
             UpdateDropdown(value)
         end
     end
-    
+
     function element:OnChanged(callback)
         local oldCallback = data.Callback
         data.Callback = function(value)
@@ -1270,7 +1324,7 @@ function Window:CreateDropdown(tab, data)
             callback(value)
         end
     end
-    
+
     function element:SetOptions(options)
         element.Options = options
         BuildDropdown()
@@ -1278,14 +1332,14 @@ function Window:CreateDropdown(tab, data)
             UpdateDropdown(options[1] or "")
         end
     end
-    
+
     return element
 end
 
 function Window:CreateLabel(tab, data)
     local element = self:CreateElement(tab, "Label", data)
     element.Frame.BackgroundTransparency = 1
-    
+
     local label = element.Label
     label.Size = UDim2.new(1, -24, 1, 0)
     label.Position = UDim2.new(0, 12, 0, 0)
@@ -1293,18 +1347,18 @@ function Window:CreateLabel(tab, data)
     label.TextColor3 = data.TextColor or self.Theme.Text
     label.TextSize = data.TextSize or 14
     label.Font = data.Font or Enum.Font.Gotham
-    
+
     function element:SetText(text)
         label.Text = text
     end
-    
+
     return element
 end
 
 function Window:CreateDivider(tab)
     local element = self:CreateElement(tab, "Divider", {Height = 24, Rounded = false})
     element.Frame.BackgroundTransparency = 1
-    
+
     local line = Instance.new("Frame")
     line.Parent = element.Frame
     line.Size = UDim2.new(1, -24, 0, 1)
@@ -1312,7 +1366,7 @@ function Window:CreateDivider(tab)
     line.BackgroundColor3 = self.Theme.Border
     line.BorderSizePixel = 0
     line.ZIndex = 2
-    
+
     return element
 end
 
@@ -1324,6 +1378,7 @@ function Library:CreateWindow(data)
         Height = data.Height or 500,
         Theme = data.Theme or self.Theme
     })
+    table.insert(Library.Windows, window) -- FIXED: track so Library:Destroy can clean this up
     return window
 end
 
@@ -1335,14 +1390,33 @@ function Library:SetTheme(theme)
     end
 end
 
+-- FIXED: previously this only deleted the ScreenGui instances directly, which
+-- left every leaked UserInputService connection (see Window.new / CreateSlider)
+-- running forever. Now it properly calls :Destroy() on every tracked window
+-- (which disconnects everything) and then does a safety-net sweep for any
+-- orphaned GUIs that weren't tracked for some reason.
 function Library:Destroy()
-    for _, gui in ipairs(Players.LocalPlayer.PlayerGui:GetChildren()) do
-        if gui:IsA("ScreenGui") and (gui.Name == "RedevUI" or gui.Name == "RedevNotifications") then
-            gui:Destroy()
+    for i = #Library.Windows, 1, -1 do
+        local window = Library.Windows[i]
+        if window and not window.Destroyed then
+            window:Destroy()
         end
     end
+    Library.Windows = {}
+
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if playerGui then
+        for _, gui in ipairs(playerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and (gui.Name == "RedevUI" or gui.Name == "RedevNotifications") then
+                gui:Destroy()
+            end
+        end
+    end
+
     if NotificationContainer then
-        NotificationContainer.Parent:Destroy()
+        if NotificationContainer.Parent then
+            NotificationContainer.Parent:Destroy()
+        end
         NotificationContainer = nil
     end
     ActiveNotifications = {}
