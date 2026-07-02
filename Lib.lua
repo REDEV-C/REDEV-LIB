@@ -1,5 +1,5 @@
 --[[
-    Redev Lib v3.0
+    Redev Lib v3.0 - FULLY FIXED
     A premium, lightweight UI library for Roblox
 ]]
 
@@ -88,11 +88,13 @@ local ActiveNotifications = {}
 local function CreateNotificationContainer()
     if NotificationContainer then return NotificationContainer end
     
+    local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+    
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "RedevNotifications"
     screenGui.ResetOnSpawn = false
     screenGui.IgnoreGuiInset = true
-    screenGui.Parent = Players.LocalPlayer.PlayerGui
+    screenGui.Parent = playerGui
     
     local container = Instance.new("Frame")
     container.Name = "Container"
@@ -224,8 +226,13 @@ function Library:Notify(data)
         }):Play()
     end)
     
+    local notificationClosed = false
+    
     closeBtn.MouseButton1Click:Connect(function()
-        Library:CloseNotification(notification)
+        if not notificationClosed then
+            notificationClosed = true
+            Library:CloseNotification(notification)
+        end
     end)
     
     -- Progress bar
@@ -244,7 +251,8 @@ function Library:Notify(data)
         Duration = duration,
         Type = type,
         Title = title,
-        Content = content
+        Content = content,
+        IsClosed = false
     }
     
     table.insert(ActiveNotifications, notificationData)
@@ -268,7 +276,8 @@ function Library:Notify(data)
         }):Play()
         
         task.wait(duration)
-        if notification.Parent then
+        if not notificationClosed and notification and notification.Parent then
+            notificationClosed = true
             Library:CloseNotification(notification)
         end
     end
@@ -279,9 +288,10 @@ end
 function Library:CloseNotification(notification)
     if not notification then return end
     
-    -- Remove from active list
-    for i, data in ipairs(ActiveNotifications) do
-        if data.Frame == notification then
+    -- Find and remove from active list safely
+    for i = #ActiveNotifications, 1, -1 do
+        if ActiveNotifications[i].Frame == notification then
+            ActiveNotifications[i].IsClosed = true
             table.remove(ActiveNotifications, i)
             break
         end
@@ -293,12 +303,19 @@ function Library:CloseNotification(notification)
     }):Play()
     
     task.wait(0.3)
-    notification:Destroy()
+    if notification and notification.Parent then
+        notification:Destroy()
+    end
 end
 
 function Library:ClearNotifications()
-    for _, data in ipairs(ActiveNotifications) do
-        Library:CloseNotification(data.Frame)
+    -- Iterate backwards to safely remove
+    for i = #ActiveNotifications, 1, -1 do
+        local data = ActiveNotifications[i]
+        if data and data.Frame then
+            data.IsClosed = true
+            Library:CloseNotification(data.Frame)
+        end
     end
     ActiveNotifications = {}
 end
@@ -318,6 +335,11 @@ function Window.new(title, properties)
     self.Tabs = {}
     self.CurrentTab = nil
     self.Minimized = false
+    self.Connections = {}
+    self.Destroyed = false
+    
+    -- Get PlayerGui safely
+    local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
     
     -- Create GUI
     self.ScreenGui = Instance.new("ScreenGui")
@@ -325,7 +347,7 @@ function Window.new(title, properties)
     self.ScreenGui.ResetOnSpawn = false
     self.ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     self.ScreenGui.IgnoreGuiInset = true
-    self.ScreenGui.Parent = Players.LocalPlayer.PlayerGui
+    self.ScreenGui.Parent = playerGui
     
     -- Main frame
     self.Main = Instance.new("Frame")
@@ -338,8 +360,12 @@ function Window.new(title, properties)
     self.Main.ClipsDescendants = true
     self.Main.ZIndex = 1
     
+    -- UIScale for opening animation (FIXED)
+    self.UIScale = Instance.new("UIScale")
+    self.UIScale.Parent = self.Main
+    self.UIScale.Scale = 0.9
+    
     -- Opening animation
-    self.Main.Scale = UDim2.new(0.9, 0, 0.9, 0)
     self.Main.BackgroundTransparency = 1
     
     CreateShadow(self.Main)
@@ -513,8 +539,9 @@ function Window.new(title, properties)
         self:Destroy()
     end)
     
-    -- Dragging logic
-    self.TitleBar.InputBegan:Connect(function(input)
+    -- Dragging logic with connection tracking (FIXED)
+    local dragConnection1 = self.TitleBar.InputBegan:Connect(function(input)
+        if self.Destroyed then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             self.Dragging = true
             self.DragStart = input.Position
@@ -527,14 +554,18 @@ function Window.new(title, properties)
             end)
         end
     end)
+    table.insert(self.Connections, dragConnection1)
     
-    self.TitleBar.InputChanged:Connect(function(input)
+    local dragConnection2 = self.TitleBar.InputChanged:Connect(function(input)
+        if self.Destroyed then return end
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             self.DragInput = input
         end
     end)
+    table.insert(self.Connections, dragConnection2)
     
-    UserInputService.InputChanged:Connect(function(input)
+    local dragConnection3 = UserInputService.InputChanged:Connect(function(input)
+        if self.Destroyed then return end
         if input == self.DragInput and self.Dragging then
             local delta = input.Position - self.DragStart
             self.Main.Position = UDim2.new(
@@ -545,10 +576,14 @@ function Window.new(title, properties)
             )
         end
     end)
+    table.insert(self.Connections, dragConnection3)
     
-    -- Opening animation
-    TweenService:Create(self.Main, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Scale = UDim2.new(1, 0, 1, 0),
+    -- Opening animation (FIXED - using UIScale)
+    TweenService:Create(self.UIScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Scale = 1
+    }):Play()
+    
+    TweenService:Create(self.Main, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         BackgroundTransparency = 0
     }):Play()
     
@@ -674,13 +709,28 @@ function Window:ToggleMinimize()
 end
 
 function Window:Destroy()
+    if self.Destroyed then return end
+    self.Destroyed = true
+    
+    -- Disconnect all connections (FIXED)
+    for _, connection in ipairs(self.Connections) do
+        connection:Disconnect()
+    end
+    self.Connections = {}
+    
+    -- Animate out using UIScale (FIXED)
+    TweenService:Create(self.UIScale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        Scale = 0.9
+    }):Play()
+    
     TweenService:Create(self.Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-        Scale = UDim2.new(0.9, 0, 0.9, 0),
         BackgroundTransparency = 1
     }):Play()
     
     task.wait(0.3)
-    self.ScreenGui:Destroy()
+    if self.ScreenGui then
+        self.ScreenGui:Destroy()
+    end
 end
 
 -- Element creation functions
@@ -872,6 +922,11 @@ function Window:CreateSlider(tab, data)
     element.Max = data.Max or 100
     element.Precision = data.Precision or 0
     
+    -- FIXED: Prevent divide by zero
+    if element.Max == element.Min then
+        element.Max = element.Min + 1
+    end
+    
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Parent = element.Frame
     valueLabel.Size = UDim2.new(0, 50, 1, 0)
@@ -930,7 +985,10 @@ function Window:CreateSlider(tab, data)
     local dragging = false
     
     local function HandleSliderInput(input)
-        if not sliderFrame.AbsoluteSize then return end
+        -- FIXED: Proper AbsoluteSize check
+        if sliderFrame.AbsoluteSize.X <= 0 then
+            return
+        end
         local relativeX = input.Position.X - sliderFrame.AbsolutePosition.X
         local percent = math.clamp(relativeX / sliderFrame.AbsoluteSize.X, 0, 1)
         local value = element.Min + (element.Max - element.Min) * percent
@@ -1153,6 +1211,11 @@ function Window:CreateDropdown(tab, data)
             btn.MouseButton1Click:Connect(function()
                 UpdateDropdown(option)
                 element.Open = false
+                -- FIXED: Animate dropdown closed
+                TweenService:Create(dropdownMenu, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Size = UDim2.new(1, -140, 0, 0)
+                }):Play()
+                task.wait(0.2)
                 dropdownMenu.Visible = false
                 TweenService:Create(dropdownArrow, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                     Rotation = 0
@@ -1178,6 +1241,12 @@ function Window:CreateDropdown(tab, data)
                 Rotation = 180
             }):Play()
         else
+            -- FIXED: Animate dropdown closed
+            TweenService:Create(dropdownMenu, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = UDim2.new(1, -140, 0, 0)
+            }):Play()
+            task.wait(0.2)
+            dropdownMenu.Visible = false
             TweenService:Create(dropdownArrow, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Rotation = 0
             }):Play()
@@ -1268,7 +1337,7 @@ end
 
 function Library:Destroy()
     for _, gui in ipairs(Players.LocalPlayer.PlayerGui:GetChildren()) do
-        if gui:IsA("ScreenGui") and gui.Name == "RedevUI" then
+        if gui:IsA("ScreenGui") and (gui.Name == "RedevUI" or gui.Name == "RedevNotifications") then
             gui:Destroy()
         end
     end
