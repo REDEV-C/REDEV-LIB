@@ -28,8 +28,8 @@ Library.Theme = {
     BorderLight = Color3.fromRGB(55, 55, 55),
 }
 
-local TweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local TweenInfoFast = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local TweenInfoStandard = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local TweenInfoStandardFast = TweenInfoStandard.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 -- Utility functions
 local function CreateRounded(instance, radius)
@@ -74,7 +74,7 @@ local function CreateRipple(parent, position)
     ripple.ZIndex = 10
     CreateRounded(ripple, 5)
     
-    TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+    TweenService:Create(ripple, TweenInfoStandard.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, 60, 0, 60),
         Position = UDim2.new(0, position.X - 30, 0, position.Y - 30),
         BackgroundTransparency = 1
@@ -209,13 +209,13 @@ function Library:Notify(data)
     closeBtn.BorderSizePixel = 0
     
     closeBtn.MouseEnter:Connect(function()
-        TweenService:Create(closeBtn, TweenInfoFast, {
+        TweenService:Create(closeBtn, TweenInfoStandardFast, {
             TextColor3 = Library.Theme.Text
         }):Play()
     end)
     
     closeBtn.MouseLeave:Connect(function()
-        TweenService:Create(closeBtn, TweenInfoFast, {
+        TweenService:Create(closeBtn, TweenInfoStandardFast, {
             TextColor3 = Library.Theme.TextDark
         }):Play()
     end)
@@ -240,14 +240,14 @@ function Library:Notify(data)
     task.wait(0.1)
     
     local targetHeight = titleLabel.AbsoluteSize.Y + contentLabel.AbsoluteSize.Y + 25
-    TweenService:Create(notification, TweenInfo, {
+    TweenService:Create(notification, TweenInfoStandard, {
         Size = UDim2.new(1, 0, 0, targetHeight),
         BackgroundTransparency = 0
     }):Play()
     
     -- Animate progress bar
     if duration > 0 then
-        TweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+        TweenService:Create(progress, TweenInfoStandard.new(duration, Enum.EasingStyle.Linear), {
             Size = UDim2.new(0, 0, 0, 2)
         }):Play()
         
@@ -263,7 +263,7 @@ end
 function Library:CloseNotification(notification)
     if not notification then return end
     
-    TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+    TweenService:Create(notification, TweenInfoStandard.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         Size = UDim2.new(1, 0, 0, 0),
         BackgroundTransparency = 1
     }):Play()
@@ -365,13 +365,13 @@ function Window.new(title, properties)
     self.MinimizeBtn.BorderSizePixel = 0
     
     self.MinimizeBtn.MouseEnter:Connect(function()
-        TweenService:Create(self.MinimizeBtn, TweenInfoFast, {
+        TweenService:Create(self.MinimizeBtn, TweenInfoStandardFast, {
             BackgroundTransparency = 0.9
         }):Play()
     end)
     
     self.MinimizeBtn.MouseLeave:Connect(function()
-        TweenService:Create(self.MinimizeBtn, TweenInfoFast, {
+        TweenService:Create(self.MinimizeBtn, TweenInfoStandardFast, {
             BackgroundTransparency = 1
         }):Play()
     end)
@@ -388,21 +388,21 @@ function Window.new(title, properties)
     self.CloseBtn.BorderSizePixel = 0
     
     self.CloseBtn.MouseEnter:Connect(function()
-        TweenService:Create(self.CloseBtn, TweenInfoFast, {
+        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
             BackgroundTransparency = 0.9,
             BackgroundColor3 = self.Theme.Error
         }):Play()
-        TweenService:Create(self.CloseBtn, TweenInfoFast, {
+        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
             TextColor3 = Color3.fromRGB(255, 255, 255)
         }):Play()
     end)
     
     self.CloseBtn.MouseLeave:Connect(function()
-        TweenService:Create(self.CloseBtn, TweenInfoFast, {
+        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
             BackgroundTransparency = 1,
             BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         }):Play()
-        TweenService:Create(self.CloseBtn, TweenInfoFast, {
+        TweenService:Create(self.CloseBtn, TweenInfoStandardFast, {
             TextColor3 = self.Theme.Error
         }):Play()
     end)
@@ -504,7 +504,7 @@ function Window.new(title, properties)
     end)
     
     -- Opening animation
-    TweenService:Create(self.Main, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    TweenService:Create(self.Main, TweenInfoStandard.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Scale = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 0
     }):Play()
@@ -535,7 +535,7 @@ function Window:CreateTab(name)
     -- Hover effect - FIXED: Removed optional chaining
     button.MouseEnter:Connect(function()
         if self.CurrentTab and button ~= self.CurrentTab.Button then
-            TweenService:Create(button, TweenInfoFast, {
+            TweenService:Create(button, TweenInfoStandardFast, {
                 BackgroundTransparency = 0.9,
                 BackgroundColor3 = self.Theme.Tertiary
             }):Play()
@@ -544,7 +544,7 @@ function Window:CreateTab(name)
     
     button.MouseLeave:Connect(function()
         if self.CurrentTab and button ~= self.CurrentTab.Button then
-            TweenService:Create(button, TweenInfoFast, {
+            TweenService:Create(button, TweenInfoStandardFast, {
                 BackgroundTransparency = 1,
                 BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             }):Play()
@@ -589,7 +589,7 @@ end
 function Window:SelectTab(tab)
     if self.CurrentTab then
         self.CurrentTab.Content.Visible = false
-        TweenService:Create(self.CurrentTab.Button, TweenInfoFast, {
+        TweenService:Create(self.CurrentTab.Button, TweenInfoStandardFast, {
             BackgroundTransparency = 1,
             BackgroundColor3 = Color3.fromRGB(255, 255, 255),
             TextColor3 = self.Theme.TextDim
@@ -598,7 +598,7 @@ function Window:SelectTab(tab)
     
     self.CurrentTab = tab
     tab.Content.Visible = true
-    TweenService:Create(tab.Button, TweenInfoFast, {
+    TweenService:Create(tab.Button, TweenInfoStandardFast, {
         BackgroundTransparency = 0.2,
         BackgroundColor3 = self.Theme.Accent,
         TextColor3 = self.Theme.Text
@@ -611,25 +611,25 @@ function Window:ToggleMinimize()
     local targetHeight = self.Minimized and 44 or self.Height
     local targetTransparency = self.Minimized and 1 or 0
     
-    TweenService:Create(self.Main, TweenInfo, {
+    TweenService:Create(self.Main, TweenInfoStandard, {
         Size = UDim2.fromOffset(self.Width, targetHeight),
     }):Play()
     
     for _, tab in ipairs(self.Tabs) do
         if tab.Content then
-            TweenService:Create(tab.Content, TweenInfo, {
+            TweenService:Create(tab.Content, TweenInfoStandard, {
                 BackgroundTransparency = targetTransparency
             }):Play()
         end
     end
     
-    TweenService:Create(self.TabContainer, TweenInfo, {
+    TweenService:Create(self.TabContainer, TweenInfoStandard, {
         BackgroundTransparency = targetTransparency
     }):Play()
 end
 
 function Window:Destroy()
-    TweenService:Create(self.Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+    TweenService:Create(self.Main, TweenInfoStandard.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         Scale = UDim2.new(0.9, 0, 0.9, 0),
         BackgroundTransparency = 1
     }):Play()
@@ -706,14 +706,14 @@ function Window:CreateButton(tab, data)
     end)
     
     button.MouseEnter:Connect(function()
-        TweenService:Create(button, TweenInfoFast, {
+        TweenService:Create(button, TweenInfoStandardFast, {
             BackgroundColor3 = self.Theme.AccentHover,
             Size = UDim2.new(0, 114, 1, -10)
         }):Play()
     end)
     
     button.MouseLeave:Connect(function()
-        TweenService:Create(button, TweenInfoFast, {
+        TweenService:Create(button, TweenInfoStandardFast, {
             BackgroundColor3 = self.Theme.Accent,
             Size = UDim2.new(0, 110, 1, -12)
         }):Play()
@@ -768,12 +768,12 @@ function Window:CreateToggle(tab, data)
         local targetTransparency = value and 0 or 0.5
         local indicatorColor = value and Color3.fromRGB(255, 255, 255) or self.Theme.TextDim
         
-        TweenService:Create(toggle, TweenInfo, {
+        TweenService:Create(toggle, TweenInfoStandard, {
             BackgroundColor3 = targetColor,
             BackgroundTransparency = targetTransparency
         }):Play()
         
-        TweenService:Create(indicator, TweenInfo, {
+        TweenService:Create(indicator, TweenInfoStandard, {
             Position = targetPos,
             BackgroundTransparency = value and 0.1 or 0.5,
             BackgroundColor3 = indicatorColor
@@ -955,14 +955,14 @@ function Window:CreateTextbox(tab, data)
     local stroke = CreateStroke(textbox, self.Theme.BorderLight, 1)
     
     textbox.Focused:Connect(function()
-        TweenService:Create(stroke, TweenInfoFast, {
+        TweenService:Create(stroke, TweenInfoStandardFast, {
             Color = self.Theme.Accent,
             Thickness = 1.5
         }):Play()
     end)
     
     textbox.FocusLost:Connect(function()
-        TweenService:Create(stroke, TweenInfoFast, {
+        TweenService:Create(stroke, TweenInfoStandardFast, {
             Color = self.Theme.BorderLight,
             Thickness = 1
         }):Play()
@@ -1079,7 +1079,7 @@ function Window:CreateDropdown(tab, data)
             
             btn.MouseEnter:Connect(function()
                 if btn.Text ~= element.Value then
-                    TweenService:Create(btn, TweenInfoFast, {
+                    TweenService:Create(btn, TweenInfoStandardFast, {
                         BackgroundTransparency = 0.9,
                         BackgroundColor3 = self.Theme.Tertiary
                     }):Play()
@@ -1087,7 +1087,7 @@ function Window:CreateDropdown(tab, data)
             end)
             
             btn.MouseLeave:Connect(function()
-                TweenService:Create(btn, TweenInfoFast, {
+                TweenService:Create(btn, TweenInfoStandardFast, {
                     BackgroundTransparency = 1,
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 }):Play()
@@ -1097,7 +1097,7 @@ function Window:CreateDropdown(tab, data)
                 UpdateDropdown(option)
                 element.Open = false
                 dropdownMenu.Visible = false
-                TweenService:Create(dropdownArrow, TweenInfoFast, {
+                TweenService:Create(dropdownArrow, TweenInfoStandardFast, {
                     Rotation = 0
                 }):Play()
             end)
@@ -1114,14 +1114,14 @@ function Window:CreateDropdown(tab, data)
         
         if element.Open then
             dropdownMenu.Size = UDim2.new(1, -140, 0, 0)
-            TweenService:Create(dropdownMenu, TweenInfo, {
+            TweenService:Create(dropdownMenu, TweenInfoStandard, {
                 Size = UDim2.new(1, -140, 0, #element.Options * 34)
             }):Play()
-            TweenService:Create(dropdownArrow, TweenInfoFast, {
+            TweenService:Create(dropdownArrow, TweenInfoStandardFast, {
                 Rotation = 180
             }):Play()
         else
-            TweenService:Create(dropdownArrow, TweenInfoFast, {
+            TweenService:Create(dropdownArrow, TweenInfoStandardFast, {
                 Rotation = 0
             }):Play()
         end
