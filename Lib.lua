@@ -1,18 +1,4 @@
---[[
-    Redev Lib v3.1 - FULLY FIXED (bugfix pass)
-    A premium, lightweight UI library for Roblox
 
-    Changes in this pass (no visual/UI changes made):
-    - Library:Notify() no longer blocks the calling thread (was task.wait()'ing inline)
-    - Fixed a per-click connection leak in window title-bar dragging
-    - Fixed permanent UserInputService connection leaks created by every slider
-    - Added touch support to slider dragging (was mouse-only)
-    - Library:Destroy() now properly tears down every window (and its connections)
-      instead of just deleting the ScreenGui instances
-    - All user Callback invocations are now pcall-protected (SafeCallback)
-    - Fixed `type` shadowing the global `type()` function inside Notify
-    - Added a guard for missing LocalPlayer instead of an obscure WaitForChild hang
-]]
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -20,14 +6,13 @@ local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
-    error("[Redev Lib] This library must be run on the client (inside a LocalScript / client-side script).")
+    error("[Redev Lib] This library must be run on the client.")
 end
 
 local Library = {}
 Library.Version = "3.1.0"
-Library.Windows = {} -- FIXED: track windows so Library:Destroy can clean them up properly
+Library.Windows = {}
 
--- Theme colors
 Library.Theme = {
     Background = Color3.fromRGB(0, 0, 0),
     Secondary = Color3.fromRGB(8, 8, 8),
@@ -104,8 +89,7 @@ local function CreateRipple(parent, position)
     end
 end
 
--- FIXED: centralized, pcall-protected callback invocation so a broken user
--- callback can't silently kill an event connection or crash the UI thread.
+
 local function SafeCallback(callback, ...)
     if not callback then return end
     local ok, err = pcall(callback, ...)
@@ -148,16 +132,13 @@ local function CreateNotificationContainer()
     return container
 end
 
--- Custom notification function
--- FIXED: this used to task.wait() for the full notification duration before
--- returning, blocking whatever script called it. The setup/animation/auto-close
--- logic now runs in its own thread via task.spawn, so this returns immediately.
+
 function Library:Notify(data)
     data = data or {}
     local title = data.Title or "Notification"
     local content = data.Content or ""
     local duration = data.Duration or 4
-    local notifType = data.Type or "info" -- FIXED: renamed from `type`, which shadowed the Lua global type()
+    local notifType = data.Type or "info"
 
     local icons = {
         info = "ℹ",
@@ -293,10 +274,7 @@ function Library:Notify(data)
 
     table.insert(ActiveNotifications, notificationData)
 
-    -- FIXED: run the animate-in / auto-close sequence on its own thread so
-    -- Library:Notify() returns immediately instead of blocking for `duration` seconds.
     task.spawn(function()
-        -- Animate in
         notification.Size = UDim2.new(1, 0, 0, 0)
         notification.BackgroundTransparency = 1
 
