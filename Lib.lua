@@ -565,7 +565,7 @@ function Window:CreateTab(name)
     
     -- Hover effect
     button.MouseEnter:Connect(function()
-        if button ~= self.CurrentTab?.Button then
+        if button ~= self.CurrentTab.Button then
             TweenService:Create(button, TweenInfoFast, {
                 BackgroundTransparency = 0.9,
                 BackgroundColor3 = self.Theme.Tertiary
