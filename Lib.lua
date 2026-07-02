@@ -29,20 +29,24 @@ Library.Windows = {} -- FIXED: track windows so Library:Destroy can clean them u
 
 -- Theme colors
 Library.Theme = {
-    Background = Color3.fromRGB(10, 10, 10),
-    Secondary = Color3.fromRGB(18, 18, 18),
-    Tertiary = Color3.fromRGB(26, 26, 26),
-    Hover = Color3.fromRGB(35, 35, 35),
-    Accent = Color3.fromRGB(0, 170, 255),
-    AccentHover = Color3.fromRGB(35, 190, 255),
+    Background = Color3.fromRGB(0, 0, 0),
+    Secondary = Color3.fromRGB(8, 8, 8),
+    Tertiary = Color3.fromRGB(14, 14, 14),
+    Hover = Color3.fromRGB(40, 40, 40),
+
+    Accent = Color3.fromRGB(255, 255, 255),
+    AccentHover = Color3.fromRGB(220, 220, 220),
+
     Text = Color3.fromRGB(255, 255, 255),
-    TextDim = Color3.fromRGB(190, 190, 190),
-    TextDark = Color3.fromRGB(130, 130, 130),
+    TextDim = Color3.fromRGB(170, 170, 170),
+    TextDark = Color3.fromRGB(100, 100, 100),
+
     Success = Color3.fromRGB(46, 204, 113),
     Warning = Color3.fromRGB(241, 196, 15),
     Error = Color3.fromRGB(231, 76, 60),
-    Border = Color3.fromRGB(40, 40, 40),
-    BorderLight = Color3.fromRGB(55, 55, 55),
+
+    Border = Color3.fromRGB(28, 28, 28),
+    BorderLight = Color3.fromRGB(45, 45, 45),
 }
 
 -- Utility functions
