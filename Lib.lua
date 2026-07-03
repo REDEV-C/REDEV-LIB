@@ -1269,8 +1269,8 @@ function Window:CreateButton(section, data)
 	local el = self:CreateElement(section, "Button", data)
 
 	local button = Instance.new("TextButton")
-	button.Size = UDim2.new(0, 110, 1, -12)
-	button.Position = UDim2.new(1, -120, 0, 6)
+	button.Size = UDim2.new(0, 110, 1, -16) -- Slightly shorter
+	button.Position = UDim2.new(1, -120, 0, 10) -- Moved lower
 	button.BackgroundColor3 = self.Theme.Accent
 	button.Text = data.Text or "Click"
 	button.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1288,6 +1288,7 @@ function Window:CreateButton(section, data)
 			BackgroundColor3 = self.Theme.AccentHover
 		}):Play()
 	end)
+
 	button.MouseLeave:Connect(function()
 		TweenService:Create(button, TweenInfo.new(0.15), {
 			BackgroundColor3 = self.Theme.Accent
@@ -1299,7 +1300,11 @@ function Window:CreateButton(section, data)
 
 		-- Ripple effect
 		local mousePos = UserInputService:GetMouseLocation()
-		local relPos = Vector2.new(mousePos.X - button.AbsolutePosition.X, mousePos.Y - button.AbsolutePosition.Y)
+		local relPos = Vector2.new(
+			mousePos.X - button.AbsolutePosition.X,
+			mousePos.Y - button.AbsolutePosition.Y
+		)
+
 		local ripple = Instance.new("Frame")
 		ripple.Size = UDim2.new(0, 10, 0, 10)
 		ripple.Position = UDim2.new(0, relPos.X - 5, 0, relPos.Y - 5)
@@ -1310,11 +1315,16 @@ function Window:CreateButton(section, data)
 		ripple.Parent = button
 		CreateRounded(ripple, 5)
 
-		local rippleTween = TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0, 60, 0, 60),
-			Position = UDim2.new(0, relPos.X - 30, 0, relPos.Y - 30),
-			BackgroundTransparency = 1
-		})
+		local rippleTween = TweenService:Create(
+			ripple,
+			TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{
+				Size = UDim2.new(0, 60, 0, 60),
+				Position = UDim2.new(0, relPos.X - 30, 0, relPos.Y - 30),
+				BackgroundTransparency = 1
+			}
+		)
+
 		rippleTween:Play()
 
 		rippleTween.Completed:Connect(function()
@@ -1324,8 +1334,14 @@ function Window:CreateButton(section, data)
 		end)
 	end)
 
-	el.SetText = function(text) button.Text = text end
-	el.Fire = function() SafeCallback(data.Callback) end
+	el.SetText = function(text)
+		button.Text = text
+	end
+
+	el.Fire = function()
+		SafeCallback(data.Callback)
+	end
+
 	return el
 end
 
