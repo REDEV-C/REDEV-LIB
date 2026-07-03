@@ -18,6 +18,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
 local LocalPlayer = Players.LocalPlayer
 
 if not LocalPlayer then
@@ -190,6 +191,8 @@ end)
 --------------------------------------------------------------------
 -- Notification System
 --------------------------------------------------------------------
+local NOTIF_WIDTH = 340
+
 local function GetNotificationContainer()
 	if not Library.NotificationContainer then
 		local playerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -197,23 +200,26 @@ local function GetNotificationContainer()
 		screenGui.Name = "RedevNotifications"
 		screenGui.ResetOnSpawn = false
 		screenGui.IgnoreGuiInset = true
+		screenGui.DisplayOrder = 100
 		screenGui.Parent = playerGui
 
+		-- Anchored to the bottom-right corner. AutomaticSize + an anchor point of
+		-- (1,1) means the container grows *upward* as notifications stack, so the
+		-- newest toast always sits in the corner instead of sliding the stack down.
 		local container = Instance.new("Frame")
 		container.Name = "Container"
-		container.Size = UDim2.new(0, 380, 0, 0)
-		container.Position = UDim2.new(1, -400, 0, 10)
+		container.AnchorPoint = Vector2.new(1, 1)
+		container.Size = UDim2.new(0, NOTIF_WIDTH, 0, 0)
+		container.Position = UDim2.new(1, -16, 1, -16)
 		container.BackgroundTransparency = 1
 		container.ClipsDescendants = false
-		-- FIX: without AutomaticSize the container's height stayed 0 forever, which
-		-- (combined with ClipsDescendants) meant notifications were never visible.
 		container.AutomaticSize = Enum.AutomaticSize.Y
 		container.Parent = screenGui
 
 		local layout = Instance.new("UIListLayout")
 		layout.Padding = UDim.new(0, Library.NotificationSpacing)
 		layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-		layout.VerticalAlignment = Enum.VerticalAlignment.Top
+		layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
 		layout.SortOrder = Enum.SortOrder.LayoutOrder
 		layout.Parent = container
 
@@ -246,20 +252,43 @@ function Library:Notify(data)
 	local container = GetNotificationContainer()
 	local accentColor = colors[notifType] or self.Theme.Accent
 
-	-- Main notification frame. AutomaticSize handles height, so we no longer
-	-- fight it with a manual Size tween (that tween used to be a silent no-op).
+	local textLeft = 45
+	local textWidth = NOTIF_WIDTH - textLeft - 34
+
+	-- FIX (root cause of "text not appearing"): the old version relied on
+	-- AutomaticSize resolving on two independently-sized labels *and* the
+	-- parent frame in the same frame, which is a known race in Roblox and
+	-- could leave the frame at 0 height so ClipsDescendants hid everything.
+	-- We now measure the wrapped text up front with TextService and use that
+	-- to lay out a single, deterministic pixel height before anything renders.
+	local titleBounds = TextService:GetTextSize(title, 15, self.Theme.FontBold, Vector2.new(textWidth, math.huge))
+	local titleY = 6
+	local titleHeight = math.max(18, titleBounds.Y)
+
+	local contentY, contentHeight = 0, 0
+	local totalHeight
+	if content ~= "" then
+		local contentBounds = TextService:GetTextSize(content, 13, self.Theme.Font, Vector2.new(textWidth, math.huge))
+		contentY = titleY + titleHeight + 2
+		contentHeight = contentBounds.Y
+		totalHeight = contentY + contentHeight + 12
+	else
+		totalHeight = math.max(46, titleY + titleHeight + 12)
+	end
+
+	-- Main notification frame — fixed, pre-computed height (no AutomaticSize
+	-- fighting a manual tween, and no risk of a 0-height first frame).
 	local notification = Instance.new("Frame")
-	notification.Size = UDim2.new(1, 0, 0, 0)
+	notification.Size = UDim2.new(1, 0, 0, totalHeight)
 	notification.BackgroundColor3 = self.Theme.Secondary
 	notification.BackgroundTransparency = 1
 	notification.ClipsDescendants = true
-	notification.AutomaticSize = Enum.AutomaticSize.Y
 	notification.ZIndex = 2
 	notification.Parent = container
 	CreateRounded(notification, 10)
 	CreateStroke(notification, accentColor, 1.5)
 
-	-- Slide-in offset (purely cosmetic, doesn't fight AutomaticSize)
+	-- Slide-in offset (cosmetic only; height is already fixed above)
 	notification.Position = UDim2.new(0, 40, 0, 0)
 
 	-- Color stripe
@@ -281,42 +310,41 @@ function Library:Notify(data)
 	iconLabel.TextSize = 18
 	iconLabel.Font = self.Theme.FontBold
 	iconLabel.TextXAlignment = Enum.TextXAlignment.Center
+	iconLabel.ZIndex = 3
 	iconLabel.Parent = notification
 
 	-- Title
 	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Size = UDim2.new(1, -60, 0, 25)
-	titleLabel.Position = UDim2.new(0, 45, 0, 5)
+	titleLabel.Size = UDim2.new(0, textWidth, 0, titleHeight)
+	titleLabel.Position = UDim2.new(0, textLeft, 0, titleY)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Text = title
 	titleLabel.TextColor3 = self.Theme.Text
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.TextYAlignment = Enum.TextYAlignment.Top
 	titleLabel.Font = self.Theme.FontBold
 	titleLabel.TextSize = 15
 	titleLabel.TextWrapped = true
-	titleLabel.AutomaticSize = Enum.AutomaticSize.Y
+	titleLabel.ZIndex = 3
 	titleLabel.Parent = notification
 
-	-- Content
-	local contentLabel = Instance.new("TextLabel")
-	contentLabel.Size = UDim2.new(1, -55, 0, 20)
-	contentLabel.Position = UDim2.new(0, 45, 0, 30)
-	contentLabel.BackgroundTransparency = 1
-	contentLabel.Text = content
-	contentLabel.TextColor3 = self.Theme.TextDim
-	contentLabel.TextXAlignment = Enum.TextXAlignment.Left
-	contentLabel.TextWrapped = true
-	contentLabel.Font = self.Theme.Font
-	contentLabel.TextSize = 13
-	contentLabel.AutomaticSize = Enum.AutomaticSize.Y
-	contentLabel.Parent = notification
-
-	-- Bottom padding so AutomaticSize doesn't hug the content text
-	local bottomPad = Instance.new("Frame")
-	bottomPad.Size = UDim2.new(1, 0, 0, 10)
-	bottomPad.Position = UDim2.new(0, 0, 0, 52)
-	bottomPad.BackgroundTransparency = 1
-	bottomPad.Parent = notification
+	-- Content (only created when there's actually content, so it never
+	-- reserves dead space or overlaps the title)
+	if content ~= "" then
+		local contentLabel = Instance.new("TextLabel")
+		contentLabel.Size = UDim2.new(0, textWidth, 0, contentHeight)
+		contentLabel.Position = UDim2.new(0, textLeft, 0, contentY)
+		contentLabel.BackgroundTransparency = 1
+		contentLabel.Text = content
+		contentLabel.TextColor3 = self.Theme.TextDim
+		contentLabel.TextXAlignment = Enum.TextXAlignment.Left
+		contentLabel.TextYAlignment = Enum.TextYAlignment.Top
+		contentLabel.TextWrapped = true
+		contentLabel.Font = self.Theme.Font
+		contentLabel.TextSize = 13
+		contentLabel.ZIndex = 3
+		contentLabel.Parent = notification
+	end
 
 	-- Close button
 	local closeBtn = Instance.new("TextButton")
@@ -327,7 +355,7 @@ function Library:Notify(data)
 	closeBtn.TextColor3 = self.Theme.TextDark
 	closeBtn.TextSize = 13
 	closeBtn.Font = self.Theme.Font
-	closeBtn.ZIndex = 3
+	closeBtn.ZIndex = 4
 	closeBtn.Parent = notification
 
 	closeBtn.MouseEnter:Connect(function()
@@ -342,6 +370,7 @@ function Library:Notify(data)
 	progress.Position = UDim2.new(0, 0, 1, -2)
 	progress.BackgroundColor3 = accentColor
 	progress.BorderSizePixel = 0
+	progress.ZIndex = 3
 	progress.Parent = notification
 	CreateRounded(progress, 1)
 
