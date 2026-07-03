@@ -1,19 +1,6 @@
 -- Redev Lib v5.0 - Advanced UI Library
 -- Author: REDEV-C
--- Features: Windows, Tabs, Sections, Toggle, Slider, Button, Textbox, Keybind,
---           Dropdown (searchable), Multi-Dropdown, ColorPicker (HSV/Alpha/Hex),
---           Label, Paragraph, Divider, Notifications, Config System, Theming,
---           Watermark, Ripple Animations, Connection Safety, Drag & Minimize.
---
--- Documentation: https://github.com/REDEV-C/REDEV-LIB (or contact the author)
---
--- Usage:
---   local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/REDEV-C/REDEV-LIB/main/Lib.lua"))()
---   local Window = Library:CreateWindow({ Title = "My Script" })
---   local Tab = Window:CreateTab("Main")
---   local Section = Window:CreateSection(Tab, "Combat")
---   Section:CreateToggle({ Name = "Aimbot", Flag = "aimbot" })
---   Library:Notify({ Title = "Welcome", Content = "Library loaded!", Duration = 3, Type = "success" })
+
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
