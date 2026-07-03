@@ -955,15 +955,24 @@ function Window:CreateSection(tab, name)
 	local header = Instance.new("TextButton")
 	header.Size = UDim2.new(1, 0, 0, 36)
 	header.BackgroundTransparency = 1
-	header.Text = "  " .. name
-	header.TextColor3 = self.Theme.Text
-	header.TextXAlignment = Enum.TextXAlignment.Left
-	header.TextSize = 15
-	header.Font = self.Theme.FontBold
+	header.Text = ""
 	header.BorderSizePixel = 0
 	header.AutoButtonColor = false
 	header.ZIndex = 2
 	header.Parent = frame
+
+	local headerText = Instance.new("TextLabel")
+	headerText.Size = UDim2.new(1, -30, 1, 0)
+	headerText.Position = UDim2.new(0, 0, 0, -2) -- Move text up (adjust to -3/-4 if needed)
+	headerText.BackgroundTransparency = 1
+	headerText.Text = "  " .. name
+	headerText.TextColor3 = self.Theme.Text
+	headerText.TextXAlignment = Enum.TextXAlignment.Left
+	headerText.TextYAlignment = Enum.TextYAlignment.Center
+	headerText.TextSize = 15
+	headerText.Font = self.Theme.FontBold
+	headerText.ZIndex = 3
+	headerText.Parent = header
 
 	local arrow = Instance.new("TextLabel")
 	arrow.Size = UDim2.new(0, 20, 1, 0)
@@ -973,7 +982,7 @@ function Window:CreateSection(tab, name)
 	arrow.TextColor3 = self.Theme.TextDim
 	arrow.TextSize = 12
 	arrow.Font = self.Theme.Font
-	arrow.ZIndex = 3
+	arrow.ZIndex = 4
 	arrow.Parent = header
 
 	local elementsFrame = Instance.new("Frame")
@@ -997,6 +1006,7 @@ function Window:CreateSection(tab, name)
 
 	section.Frame = frame
 	section.Header = header
+	section.HeaderText = headerText
 	section.Arrow = arrow
 	section.ElementsFrame = elementsFrame
 
