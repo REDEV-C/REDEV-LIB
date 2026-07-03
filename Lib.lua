@@ -943,7 +943,7 @@ function Window:CreateSection(tab, name)
 	}
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 36)
+	frame.Size = UDim2.new(1, 0, 0, 40)
 	frame.BackgroundColor3 = self.Theme.Secondary
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true
@@ -986,7 +986,7 @@ function Window:CreateSection(tab, name)
 	arrow.Parent = header
 
 	local elementsFrame = Instance.new("Frame")
-	elementsFrame.Position = UDim2.new(0, 0, 0, 36) -- Below the header
+	elementsFrame.Position = UDim2.new(0, 0, 0, 40) -- try 40-44
 	elementsFrame.Size = UDim2.new(1, 0, 0, 0)
 	elementsFrame.BackgroundTransparency = 1
 	elementsFrame.BorderSizePixel = 0
