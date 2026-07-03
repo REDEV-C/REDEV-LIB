@@ -468,7 +468,7 @@ end
 -- Watermark (simple)
 --------------------------------------------------------------------
 function Library:CreateWatermark(text)
-	text = text or "Redev Lib | fps: ..."
+	text = text or "CZK UNIVERSAL | BETA-1.0.1 | FPS: ..."
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "RedevWatermark"
@@ -512,7 +512,7 @@ function Library:CreateWatermark(text)
 		end
 		if dt > 0 then
 			local fps = math.floor((1 / dt) + 0.5)
-			label.Text = text:gsub("fps: %.%.%.", "fps: " .. fps)
+			label.Text = text:gsub("FPS: %.%.%.", "FPS: " .. fps)
 		end
 	end)
 
