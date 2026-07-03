@@ -1269,8 +1269,9 @@ function Window:CreateButton(section, data)
 	local el = self:CreateElement(section, "Button", data)
 
 	local button = Instance.new("TextButton")
-	button.Size = UDim2.new(0, 110, 1, -16) -- Slightly shorter
-	button.Position = UDim2.new(1, -120, 0, 10) -- Moved lower
+	button.Size = UDim2.new(0, 110, 0, 28)
+	button.AnchorPoint = Vector2.new(1, 0.5)
+	button.Position = UDim2.new(1, -10, 0.5, 0)
 	button.BackgroundColor3 = self.Theme.Accent
 	button.Text = data.Text or "Click"
 	button.TextColor3 = Color3.fromRGB(255, 255, 255)
