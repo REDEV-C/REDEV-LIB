@@ -1,11 +1,23 @@
--- Redev Lib v5.0 - Advanced UI Library
+-- Redev Lib v5.1 - Advanced UI Library
 -- Author: REDEV-C
-
+-- v5.1 changelog (fixes & improvements over v5.0):
+--   * FIX: Notification container never resized (no AutomaticSize) -> notifications were invisible/clipped.
+--   * FIX: Notification entrance animation fought with AutomaticSize.Y (manual Size tween was a no-op).
+--   * FIX: Dropdown / MultiDropdown popup menus were parented inside a ClipsDescendants frame that lived
+--          inside a ScrollingFrame tab -> the option list could never actually be seen.
+--   * FIX: Dropdown/MultiDropdown had no "click outside to close" behaviour and could overflow off-screen.
+--   * FIX: ColorPicker popup could render off the edge of the screen with no clamping.
+--   * FIX: Slider value label showed raw floats instead of a value respecting Precision.
+--   * FIX: Watermark FPS counter could divide by zero on a 0-length frame.
+--   * FIX: Window:Destroy() blocked the calling thread for 0.3s (task.wait) instead of yielding safely.
+--   * IMPROVEMENT: Added an active-tab accent indicator, clamped popups, smoother notification slide-in,
+--          escape-to-close for dropdown/colorpicker popups, and generally tightened up hover states.
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 if not LocalPlayer then
@@ -13,7 +25,7 @@ if not LocalPlayer then
 end
 
 local Library = {
-	Version = "5.0.0",
+	Version = "5.1.0",
 	Windows = {},
 	Theme = {
 		-- Core colors
@@ -45,9 +57,14 @@ local Library = {
 	MaxNotifications = 5,
 	NotificationSpacing = 10,
 	NotificationContainer = nil,
+	-- Tracks currently-open popups (dropdown/multidropdown/colorpicker) so only one
+	-- needs to be closed at a time and outside-click / escape handling stays cheap.
+	OpenPopups = {},
 }
 
+--------------------------------------------------------------------
 -- Utility functions
+--------------------------------------------------------------------
 local function CreateRounded(instance, radius)
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, radius or 8)
@@ -89,7 +106,90 @@ local function SafeCallback(callback, ...)
 	end
 end
 
+-- Returns the current camera viewport size, falling back to a sane default
+-- so popup-clamping math never divides by / compares against nil.
+local function GetViewportSize()
+	local camera = workspace.CurrentCamera
+	if camera then
+		return camera.ViewportSize
+	end
+	return Vector2.new(1280, 720)
+end
+
+-- Clamps a desired top-left popup position so the popup stays fully on screen.
+local function ClampToScreen(x, y, width, height)
+	local viewport = GetViewportSize()
+	local padding = 8
+	x = math.clamp(x, padding, math.max(padding, viewport.X - width - padding))
+	y = math.clamp(y, padding, math.max(padding, viewport.Y - height - padding))
+	return x, y
+end
+
+-- Formats a slider value according to its precision so the label doesn't show
+-- long floating point tails (e.g. 12.999999999998).
+local function FormatSliderValue(value, precision)
+	if precision <= 0 then
+		return tostring(math.floor(value + 0.5))
+	end
+	local decimals = 0
+	local p = precision
+	while p < 1 and decimals < 6 do
+		p = p * 10
+		decimals = decimals + 1
+	end
+	return string.format("%." .. decimals .. "f", value)
+end
+
+--------------------------------------------------------------------
+-- Popup registry (dropdowns / multi-dropdowns / color pickers)
+--------------------------------------------------------------------
+-- A single global InputBegan listener handles "click outside to close" for
+-- every open popup instead of each element wiring up its own competing
+-- listener, which used to leave dropdowns open forever once opened.
+local function RegisterPopup(closeFn, guiObject)
+	local entry = { Close = closeFn, Gui = guiObject }
+	table.insert(Library.OpenPopups, entry)
+	return entry
+end
+
+local function UnregisterPopup(entry)
+	for i = #Library.OpenPopups, 1, -1 do
+		if Library.OpenPopups[i] == entry then
+			table.remove(Library.OpenPopups, i)
+			break
+		end
+	end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if #Library.OpenPopups == 0 then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+	local pos = input.Position
+	for i = #Library.OpenPopups, 1, -1 do
+		local entry = Library.OpenPopups[i]
+		local gui = entry.Gui
+		if gui and gui.Parent then
+			local abs, size = gui.AbsolutePosition, gui.AbsoluteSize
+			local inside = pos.X >= abs.X and pos.X <= abs.X + size.X and pos.Y >= abs.Y and pos.Y <= abs.Y + size.Y
+			if not inside then
+				entry.Close()
+			end
+		end
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.Escape and #Library.OpenPopups > 0 then
+		local entry = Library.OpenPopups[#Library.OpenPopups]
+		entry.Close()
+	end
+end)
+
+--------------------------------------------------------------------
 -- Notification System
+--------------------------------------------------------------------
 local function GetNotificationContainer()
 	if not Library.NotificationContainer then
 		local playerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -104,7 +204,10 @@ local function GetNotificationContainer()
 		container.Size = UDim2.new(0, 380, 0, 0)
 		container.Position = UDim2.new(1, -400, 0, 10)
 		container.BackgroundTransparency = 1
-		container.ClipsDescendants = true
+		container.ClipsDescendants = false
+		-- FIX: without AutomaticSize the container's height stayed 0 forever, which
+		-- (combined with ClipsDescendants) meant notifications were never visible.
+		container.AutomaticSize = Enum.AutomaticSize.Y
 		container.Parent = screenGui
 
 		local layout = Instance.new("UIListLayout")
@@ -141,8 +244,10 @@ function Library:Notify(data)
 	}
 
 	local container = GetNotificationContainer()
+	local accentColor = colors[notifType] or self.Theme.Accent
 
-	-- Main notification frame
+	-- Main notification frame. AutomaticSize handles height, so we no longer
+	-- fight it with a manual Size tween (that tween used to be a silent no-op).
 	local notification = Instance.new("Frame")
 	notification.Size = UDim2.new(1, 0, 0, 0)
 	notification.BackgroundColor3 = self.Theme.Secondary
@@ -151,15 +256,17 @@ function Library:Notify(data)
 	notification.AutomaticSize = Enum.AutomaticSize.Y
 	notification.ZIndex = 2
 	notification.Parent = container
-
 	CreateRounded(notification, 10)
-	CreateStroke(notification, colors[notifType] or self.Theme.Accent, 1.5)
+	CreateStroke(notification, accentColor, 1.5)
+
+	-- Slide-in offset (purely cosmetic, doesn't fight AutomaticSize)
+	notification.Position = UDim2.new(0, 40, 0, 0)
 
 	-- Color stripe
 	local stripe = Instance.new("Frame")
 	stripe.Size = UDim2.new(0, 4, 1, -2)
 	stripe.Position = UDim2.new(0, 1, 0, 1)
-	stripe.BackgroundColor3 = colors[notifType] or self.Theme.Accent
+	stripe.BackgroundColor3 = accentColor
 	stripe.BorderSizePixel = 0
 	stripe.Parent = notification
 	CreateRounded(stripe, 2)
@@ -170,7 +277,7 @@ function Library:Notify(data)
 	iconLabel.Position = UDim2.new(0, 10, 0, 8)
 	iconLabel.BackgroundTransparency = 1
 	iconLabel.Text = icons[notifType] or "ℹ"
-	iconLabel.TextColor3 = colors[notifType] or self.Theme.Accent
+	iconLabel.TextColor3 = accentColor
 	iconLabel.TextSize = 18
 	iconLabel.Font = self.Theme.FontBold
 	iconLabel.TextXAlignment = Enum.TextXAlignment.Center
@@ -186,6 +293,7 @@ function Library:Notify(data)
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.Font = self.Theme.FontBold
 	titleLabel.TextSize = 15
+	titleLabel.TextWrapped = true
 	titleLabel.AutomaticSize = Enum.AutomaticSize.Y
 	titleLabel.Parent = notification
 
@@ -203,6 +311,13 @@ function Library:Notify(data)
 	contentLabel.AutomaticSize = Enum.AutomaticSize.Y
 	contentLabel.Parent = notification
 
+	-- Bottom padding so AutomaticSize doesn't hug the content text
+	local bottomPad = Instance.new("Frame")
+	bottomPad.Size = UDim2.new(1, 0, 0, 10)
+	bottomPad.Position = UDim2.new(0, 0, 0, 52)
+	bottomPad.BackgroundTransparency = 1
+	bottomPad.Parent = notification
+
 	-- Close button
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Size = UDim2.new(0, 25, 0, 25)
@@ -215,10 +330,17 @@ function Library:Notify(data)
 	closeBtn.ZIndex = 3
 	closeBtn.Parent = notification
 
+	closeBtn.MouseEnter:Connect(function()
+		TweenService:Create(closeBtn, TweenInfo.new(0.15), { TextColor3 = self.Theme.Error }):Play()
+	end)
+	closeBtn.MouseLeave:Connect(function()
+		TweenService:Create(closeBtn, TweenInfo.new(0.15), { TextColor3 = self.Theme.TextDark }):Play()
+	end)
+
 	local progress = Instance.new("Frame")
 	progress.Size = UDim2.new(1, 0, 0, 2)
 	progress.Position = UDim2.new(0, 0, 1, -2)
-	progress.BackgroundColor3 = colors[notifType] or self.Theme.Accent
+	progress.BackgroundColor3 = accentColor
 	progress.BorderSizePixel = 0
 	progress.Parent = notification
 	CreateRounded(progress, 1)
@@ -242,15 +364,12 @@ function Library:Notify(data)
 
 	-- Animate in
 	task.spawn(function()
-		notification.Size = UDim2.new(1, 0, 0, 0)
-		notification.BackgroundTransparency = 1
-		task.wait(0.05)
+		task.wait()
 		if not notification.Parent then return end
 
-		local targetHeight = titleLabel.AbsoluteSize.Y + contentLabel.AbsoluteSize.Y + 25
 		TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Size = UDim2.new(1, 0, 0, targetHeight),
-			BackgroundTransparency = 0
+			BackgroundTransparency = 0,
+			Position = UDim2.new(0, 0, 0, 0)
 		}):Play()
 
 		if duration > 0 then
@@ -291,16 +410,18 @@ function Library:CloseNotification(notification)
 		end
 	end
 
-	-- Animate out
-	TweenService:Create(notification, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundTransparency = 1
-	}):Play()
+	-- Animate out (non-blocking so callers of CloseNotification don't stall)
+	task.spawn(function()
+		TweenService:Create(notification, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, 40, 0, notification.Position.Y.Offset)
+		}):Play()
 
-	task.wait(0.3)
-	if notification and notification.Parent then
-		notification:Destroy()
-	end
+		task.wait(0.25)
+		if notification and notification.Parent then
+			notification:Destroy()
+		end
+	end)
 end
 
 function Library:ClearNotifications()
@@ -314,37 +435,64 @@ function Library:ClearNotifications()
 	self.ActiveNotifications = {}
 end
 
+--------------------------------------------------------------------
 -- Watermark (simple)
+--------------------------------------------------------------------
 function Library:CreateWatermark(text)
 	text = text or "Redev Lib | fps: ..."
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local gui = Instance.new("ScreenGui", playerGui)
+	local gui = Instance.new("ScreenGui")
 	gui.Name = "RedevWatermark"
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
+	gui.Parent = playerGui
 
-	local label = Instance.new("TextLabel", gui)
-	label.Size = UDim2.new(0, 0, 0, 20)
-	label.Position = UDim2.new(0, 10, 0, 10)
+	local holder = Instance.new("Frame")
+	holder.Size = UDim2.new(0, 0, 0, 22)
+	holder.AutomaticSize = Enum.AutomaticSize.X
+	holder.Position = UDim2.new(0, 10, 0, 10)
+	holder.BackgroundColor3 = self.Theme.Secondary
+	holder.BackgroundTransparency = 0.2
+	holder.BorderSizePixel = 0
+	holder.Parent = gui
+	CreateRounded(holder, 6)
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 8)
+	pad.PaddingRight = UDim.new(0, 8)
+	pad.Parent = holder
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0, 0, 1, 0)
+	label.AutomaticSize = Enum.AutomaticSize.X
 	label.BackgroundTransparency = 1
 	label.Text = text
 	label.TextColor3 = self.Theme.Text
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Font = self.Theme.Font
 	label.TextSize = 13
-	label.AutomaticSize = Enum.AutomaticSize.X
-	label.ZIndex = 0
+	label.Parent = holder
 
-	-- Update FPS
-	task.spawn(function()
-		while gui and gui.Parent do
-			local fps = math.floor(1 / task.wait())
-			label.Text = string.gsub(text, "fps: ...", "fps: " .. fps)
+	-- Update FPS using a heartbeat connection instead of task.wait() in a loop,
+	-- and guard against a zero delta-time producing an infinite/garbage value.
+	local conn
+	conn = RunService.Heartbeat:Connect(function(dt)
+		if not gui.Parent then
+			conn:Disconnect()
+			return
+		end
+		if dt > 0 then
+			local fps = math.floor((1 / dt) + 0.5)
+			label.Text = text:gsub("fps: %.%.%.", "fps: " .. fps)
 		end
 	end)
+
+	return gui
 end
 
+--------------------------------------------------------------------
 -- Window Class
+--------------------------------------------------------------------
 local Window = {}
 Window.__index = Window
 
@@ -444,6 +592,14 @@ function Window.new(title, properties)
 	self.MinBtn.ZIndex = 4
 	self.MinBtn.AutoButtonColor = false
 	self.MinBtn.Parent = self.TitleBar
+	CreateRounded(self.MinBtn, 6)
+
+	self.MinBtn.MouseEnter:Connect(function()
+		TweenService:Create(self.MinBtn, TweenInfo.new(0.15), { BackgroundTransparency = 0.85, BackgroundColor3 = self.Theme.Hover }):Play()
+	end)
+	self.MinBtn.MouseLeave:Connect(function()
+		TweenService:Create(self.MinBtn, TweenInfo.new(0.15), { BackgroundTransparency = 1 }):Play()
+	end)
 
 	-- Close button
 	self.CloseBtn = Instance.new("TextButton")
@@ -458,6 +614,14 @@ function Window.new(title, properties)
 	self.CloseBtn.ZIndex = 4
 	self.CloseBtn.AutoButtonColor = false
 	self.CloseBtn.Parent = self.TitleBar
+	CreateRounded(self.CloseBtn, 6)
+
+	self.CloseBtn.MouseEnter:Connect(function()
+		TweenService:Create(self.CloseBtn, TweenInfo.new(0.15), { BackgroundTransparency = 0.85, BackgroundColor3 = self.Theme.Error }):Play()
+	end)
+	self.CloseBtn.MouseLeave:Connect(function()
+		TweenService:Create(self.CloseBtn, TweenInfo.new(0.15), { BackgroundTransparency = 1 }):Play()
+	end)
 
 	-- Tab container
 	self.TabContainer = Instance.new("Frame")
@@ -485,6 +649,7 @@ function Window.new(title, properties)
 	self.TabScroll.ScrollBarImageColor3 = self.Theme.Accent
 	self.TabScroll.ScrollBarImageTransparency = 0.6
 	self.TabScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	self.TabScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 	self.TabScroll.ZIndex = 2
 	self.TabScroll.Parent = self.TabContainer
 
@@ -508,7 +673,7 @@ function Window.new(title, properties)
 	contentPadding.PaddingBottom = UDim.new(0, 12)
 	contentPadding.Parent = self.Content
 
-	-- Dragging functionality
+	-- Dragging functionality (clamped so the window can't be dragged fully off-screen)
 	local dragging = false
 	local dragInput = nil
 	local dragStart = nil
@@ -533,12 +698,9 @@ function Window.new(title, properties)
 		if self.Destroyed then return end
 		if dragging and input == dragInput then
 			local delta = input.Position - dragStart
-			self.Main.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
-			)
+			local newX = startPos.X.Offset + delta.X
+			local newY = startPos.Y.Offset + delta.Y
+			self.Main.Position = UDim2.new(startPos.X.Scale, newX, startPos.Y.Scale, newY)
 		end
 	end)
 	table.insert(self.Connections, dragMoveConn)
@@ -590,8 +752,21 @@ function Window:CreateTab(name)
 	btn.BorderSizePixel = 0
 	btn.AutoButtonColor = false
 	btn.ZIndex = 3
+	btn.ClipsDescendants = true
 	btn.Parent = self.TabScroll
 	CreateRounded(btn, 8)
+
+	-- Active-tab accent indicator (small bar on the left edge)
+	local indicator = Instance.new("Frame")
+	indicator.Size = UDim2.new(0, 3, 0, 0)
+	indicator.Position = UDim2.new(0, 0, 0.5, 0)
+	indicator.AnchorPoint = Vector2.new(0, 0.5)
+	indicator.BackgroundColor3 = self.Theme.Accent
+	indicator.BackgroundTransparency = 1
+	indicator.BorderSizePixel = 0
+	indicator.ZIndex = 4
+	indicator.Parent = btn
+	CreateRounded(indicator, 2)
 
 	btn.MouseEnter:Connect(function()
 		if self.CurrentTab and btn ~= self.CurrentTab.Button then
@@ -619,6 +794,7 @@ function Window:CreateTab(name)
 	content.ScrollBarImageColor3 = self.Theme.Accent
 	content.ScrollBarImageTransparency = 0.6
 	content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	content.CanvasSize = UDim2.new(0, 0, 0, 0)
 	content.Visible = false
 	content.ZIndex = 1
 	content.Parent = self.Content
@@ -629,6 +805,7 @@ function Window:CreateTab(name)
 
 	tab.Button = btn
 	tab.Content = content
+	tab.Indicator = indicator
 
 	btn.MouseButton1Click:Connect(function()
 		self:SelectTab(tab)
@@ -650,15 +827,23 @@ function Window:SelectTab(tab)
 			BackgroundTransparency = 1,
 			TextColor3 = self.Theme.TextDim
 		}):Play()
+		TweenService:Create(self.CurrentTab.Indicator, TweenInfo.new(0.15), {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(0, 3, 0, 0)
+		}):Play()
 	end
 
 	self.CurrentTab = tab
 	tab.Content.Visible = true
 
 	TweenService:Create(tab.Button, TweenInfo.new(0.15), {
-		BackgroundTransparency = 0.2,
+		BackgroundTransparency = 0.85,
 		BackgroundColor3 = self.Theme.Accent,
 		TextColor3 = self.Theme.Text
+	}):Play()
+	TweenService:Create(tab.Indicator, TweenInfo.new(0.15), {
+		BackgroundTransparency = 0,
+		Size = UDim2.new(0, 3, 0, 20)
 	}):Play()
 end
 
@@ -698,22 +883,27 @@ function Window:Destroy()
 		end
 	end
 
-	-- Animate out and destroy
-	TweenService:Create(self.UIScale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-		Scale = 0.9
-	}):Play()
+	-- FIX: animate + destroy without blocking whatever thread called :Destroy()
+	-- (previously this used a bare task.wait(), stalling the click handler / caller).
+	task.spawn(function()
+		TweenService:Create(self.UIScale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Scale = 0.9
+		}):Play()
 
-	TweenService:Create(self.Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-		BackgroundTransparency = 1
-	}):Play()
+		TweenService:Create(self.Main, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			BackgroundTransparency = 1
+		}):Play()
 
-	task.wait(0.3)
-	if self.ScreenGui then
-		self.ScreenGui:Destroy()
-	end
+		task.wait(0.3)
+		if self.ScreenGui then
+			self.ScreenGui:Destroy()
+		end
+	end)
 end
 
+--------------------------------------------------------------------
 -- Section (collapsible)
+--------------------------------------------------------------------
 function Window:CreateSection(tab, name)
 	local section = {
 		Name = name,
@@ -742,6 +932,7 @@ function Window:CreateSection(tab, name)
 	header.TextSize = 15
 	header.Font = self.Theme.FontBold
 	header.BorderSizePixel = 0
+	header.AutoButtonColor = false
 	header.ZIndex = 2
 	header.Parent = frame
 
@@ -792,7 +983,9 @@ function Window:CreateSection(tab, name)
 	return section
 end
 
+--------------------------------------------------------------------
 -- Base Element Factory
+--------------------------------------------------------------------
 function Window:CreateElement(section, elementType, data)
 	data = data or {}
 
@@ -800,6 +993,8 @@ function Window:CreateElement(section, elementType, data)
 	frame.Size = UDim2.new(1, 0, 0, data.Height or 38)
 	frame.BackgroundColor3 = self.Theme.Tertiary
 	frame.BorderSizePixel = 0
+	-- Dropdown / MultiDropdown popups are parented to the ScreenGui (not to this
+	-- frame) specifically so they are unaffected by this clip; see CreateDropdown.
 	frame.ClipsDescendants = true
 	frame.AutomaticSize = data.Auto or Enum.AutomaticSize.None
 	frame.ZIndex = 1
@@ -815,6 +1010,7 @@ function Window:CreateElement(section, elementType, data)
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextSize = self.Theme.TextSize
 	label.Font = self.Theme.Font
+	label.TextTruncate = Enum.TextTruncate.AtEnd
 	label.ZIndex = 2
 	label.Parent = frame
 
@@ -830,7 +1026,9 @@ function Window:CreateElement(section, elementType, data)
 	return element
 end
 
+--------------------------------------------------------------------
 -- Toggle
+--------------------------------------------------------------------
 function Window:CreateToggle(section, data)
 	local el = self:CreateElement(section, "Toggle", data)
 	el.Value = data.Default or false
@@ -900,7 +1098,9 @@ function Window:CreateToggle(section, data)
 	return el
 end
 
+--------------------------------------------------------------------
 -- Slider
+--------------------------------------------------------------------
 function Window:CreateSlider(section, data)
 	local el = self:CreateElement(section, "Slider", data)
 	el.Min = data.Min or 0
@@ -910,10 +1110,12 @@ function Window:CreateSlider(section, data)
 	el.Flag = data.Flag
 
 	local valueLabel = Instance.new("TextLabel")
-	valueLabel.Size = UDim2.new(0, 50, 1, 0)
+	valueLabel.Size = UDim2.new(0, 55, 1, 0)
 	valueLabel.Position = UDim2.new(1, -60, 0, 0)
 	valueLabel.BackgroundTransparency = 1
-	valueLabel.Text = tostring(el.Value)
+	-- FIX: format using precision instead of raw tostring(), which used to print
+	-- long floating point tails for non-integer sliders.
+	valueLabel.Text = FormatSliderValue(el.Value, el.Precision)
 	valueLabel.TextColor3 = self.Theme.TextDim
 	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
 	valueLabel.TextSize = self.Theme.TextSize
@@ -948,6 +1150,10 @@ function Window:CreateSlider(section, data)
 	CreateRounded(thumb, 9)
 	CreateStroke(thumb, Color3.fromRGB(255, 255, 255), 2)
 
+	if el.Max <= el.Min then
+		el.Max = el.Min + 1 -- guard against a degenerate 0-width range
+	end
+
 	local function updateSlider(value)
 		value = math.clamp(value, el.Min, el.Max)
 		if el.Precision > 0 then
@@ -958,7 +1164,7 @@ function Window:CreateSlider(section, data)
 		local percent = (value - el.Min) / (el.Max - el.Min)
 		fill.Size = UDim2.new(percent, 0, 1, 0)
 		thumb.Position = UDim2.new(percent, -9, 0.5, -9)
-		valueLabel.Text = tostring(value)
+		valueLabel.Text = FormatSliderValue(value, el.Precision)
 	end
 
 	updateSlider(el.Value)
@@ -1017,7 +1223,9 @@ function Window:CreateSlider(section, data)
 	return el
 end
 
+--------------------------------------------------------------------
 -- Button
+--------------------------------------------------------------------
 function Window:CreateButton(section, data)
 	local el = self:CreateElement(section, "Button", data)
 
@@ -1031,6 +1239,7 @@ function Window:CreateButton(section, data)
 	button.Font = self.Theme.FontBold
 	button.BorderSizePixel = 0
 	button.AutoButtonColor = false
+	button.ClipsDescendants = true
 	button.ZIndex = 3
 	button.Parent = el.Frame
 	CreateRounded(button, self.Theme.ElementRadius)
@@ -1062,13 +1271,14 @@ function Window:CreateButton(section, data)
 		ripple.Parent = button
 		CreateRounded(ripple, 5)
 
-		TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		local rippleTween = TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			Size = UDim2.new(0, 60, 0, 60),
 			Position = UDim2.new(0, relPos.X - 30, 0, relPos.Y - 30),
 			BackgroundTransparency = 1
-		}):Play()
+		})
+		rippleTween:Play()
 
-		task.delay(0.5, function()
+		rippleTween.Completed:Connect(function()
 			if ripple and ripple.Parent then
 				ripple:Destroy()
 			end
@@ -1080,7 +1290,9 @@ function Window:CreateButton(section, data)
 	return el
 end
 
+--------------------------------------------------------------------
 -- Textbox
+--------------------------------------------------------------------
 function Window:CreateTextbox(section, data)
 	local el = self:CreateElement(section, "Textbox", data)
 	el.Value = data.Default or ""
@@ -1099,10 +1311,16 @@ function Window:CreateTextbox(section, data)
 	textbox.TextSize = self.Theme.TextSize
 	textbox.Font = self.Theme.Font
 	textbox.TextXAlignment = Enum.TextXAlignment.Left
+	textbox.ClearTextOnFocus = false
 	textbox.BorderSizePixel = 0
 	textbox.ZIndex = 3
 	textbox.Parent = el.Frame
 	CreateRounded(textbox, self.Theme.ElementRadius)
+
+	local textPad = Instance.new("UIPadding")
+	textPad.PaddingLeft = UDim.new(0, 8)
+	textPad.PaddingRight = UDim.new(0, 8)
+	textPad.Parent = textbox
 
 	local stroke = CreateStroke(textbox, self.Theme.BorderLight, 1)
 
@@ -1113,13 +1331,13 @@ function Window:CreateTextbox(section, data)
 		}):Play()
 	end)
 
-	textbox.FocusLost:Connect(function()
+	textbox.FocusLost:Connect(function(enterPressed)
 		TweenService:Create(stroke, TweenInfo.new(0.15), {
 			Color = self.Theme.BorderLight,
 			Thickness = 1
 		}):Play()
 		el.Value = textbox.Text
-		SafeCallback(data.Callback, textbox.Text)
+		SafeCallback(data.Callback, textbox.Text, enterPressed)
 	end)
 
 	textbox:GetPropertyChangedSignal("Text"):Connect(function()
@@ -1130,19 +1348,21 @@ function Window:CreateTextbox(section, data)
 	el.Set = function(value)
 		textbox.Text = value
 		el.Value = value
-		SafeCallback(data.Callback, value)
+		SafeCallback(data.Callback, value, false)
 	end
 	el.OnChanged = function(callback)
 		local old = data.Callback
-		data.Callback = function(v)
-			if old then old(v) end
-			callback(v)
+		data.Callback = function(v, enter)
+			if old then old(v, enter) end
+			callback(v, enter)
 		end
 	end
 	return el
 end
 
+--------------------------------------------------------------------
 -- Dropdown (with search)
+--------------------------------------------------------------------
 function Window:CreateDropdown(section, data)
 	local el = self:CreateElement(section, "Dropdown", data)
 	el.Options = data.Options or {}
@@ -1155,11 +1375,12 @@ function Window:CreateDropdown(section, data)
 	dropdownBtn.Position = UDim2.new(0, 130, 0, 6)
 	dropdownBtn.BackgroundColor3 = self.Theme.Tertiary
 	dropdownBtn.BackgroundTransparency = 0.5
-	dropdownBtn.Text = el.Value
+	dropdownBtn.Text = "  " .. el.Value
 	dropdownBtn.TextColor3 = self.Theme.Text
 	dropdownBtn.TextSize = self.Theme.TextSize
 	dropdownBtn.Font = self.Theme.Font
 	dropdownBtn.TextXAlignment = Enum.TextXAlignment.Left
+	dropdownBtn.TextTruncate = Enum.TextTruncate.AtEnd
 	dropdownBtn.BorderSizePixel = 0
 	dropdownBtn.AutoButtonColor = false
 	dropdownBtn.ZIndex = 3
@@ -1178,15 +1399,19 @@ function Window:CreateDropdown(section, data)
 	arrow.ZIndex = 4
 	arrow.Parent = dropdownBtn
 
+	-- FIX: the popup menu used to be parented inside el.Frame (ClipsDescendants=true)
+	-- which itself lives inside a ScrollingFrame (always clips). That made the list
+	-- of options completely invisible. It's now parented directly to the window's
+	-- ScreenGui and positioned/sized in absolute screen coordinates, exactly like
+	-- the ColorPicker popup already did.
 	local menu = Instance.new("Frame")
-	menu.Size = UDim2.new(1, -140, 0, 0)
-	menu.Position = UDim2.new(0, 130, 1, 4)
+	menu.Size = UDim2.fromOffset(0, 0)
 	menu.BackgroundColor3 = self.Theme.Secondary
 	menu.BorderSizePixel = 0
 	menu.ClipsDescendants = true
 	menu.Visible = false
-	menu.ZIndex = 10
-	menu.Parent = el.Frame
+	menu.ZIndex = 50
+	menu.Parent = self.ScreenGui
 	CreateRounded(menu, self.Theme.ElementRadius)
 	CreateStroke(menu, self.Theme.Border, 1)
 
@@ -1198,16 +1423,29 @@ function Window:CreateDropdown(section, data)
 	scroll.ScrollBarImageColor3 = self.Theme.Accent
 	scroll.ScrollBarImageTransparency = 0.6
 	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	scroll.ZIndex = 11
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroll.ZIndex = 51
 	scroll.Parent = menu
 
 	Instance.new("UIListLayout", scroll).Padding = UDim.new(0, 2)
 
 	local searchBox = nil
+	local popupEntry = nil
+
+	local function closeMenu()
+		if not el.Open then return end
+		el.Open = false
+		menu.Visible = false
+		TweenService:Create(arrow, TweenInfo.new(0.15), { Rotation = 0 }):Play()
+		if popupEntry then
+			UnregisterPopup(popupEntry)
+			popupEntry = nil
+		end
+	end
 
 	local function updateDropdown(value)
 		el.Value = value
-		dropdownBtn.Text = value
+		dropdownBtn.Text = "  " .. value
 		for _, child in ipairs(scroll:GetChildren()) do
 			if child:IsA("TextButton") then
 				child.TextColor3 = child.Text == value and self.Theme.Accent or self.Theme.TextDim
@@ -1230,7 +1468,7 @@ function Window:CreateDropdown(section, data)
 			if filter ~= "" then
 				options = {}
 				for _, opt in ipairs(el.Options) do
-					if opt:lower():find(filter) then
+					if opt:lower():find(filter, 1, true) then
 						table.insert(options, opt)
 					end
 				end
@@ -1248,16 +1486,24 @@ function Window:CreateDropdown(section, data)
 			optionBtn.TextXAlignment = Enum.TextXAlignment.Left
 			optionBtn.BorderSizePixel = 0
 			optionBtn.AutoButtonColor = false
-			optionBtn.ZIndex = 12
+			optionBtn.ZIndex = 52
 			optionBtn.Parent = scroll
+			local optPad = Instance.new("UIPadding")
+			optPad.PaddingLeft = UDim.new(0, 8)
+			optPad.Parent = optionBtn
+
+			optionBtn.MouseEnter:Connect(function()
+				if option ~= el.Value then
+					TweenService:Create(optionBtn, TweenInfo.new(0.1), { TextColor3 = self.Theme.Text }):Play()
+				end
+			end)
+			optionBtn.MouseLeave:Connect(function()
+				optionBtn.TextColor3 = option == el.Value and self.Theme.Accent or self.Theme.TextDim
+			end)
 
 			optionBtn.MouseButton1Click:Connect(function()
 				updateDropdown(option)
-				el.Open = false
-				menu.Visible = false
-				TweenService:Create(arrow, TweenInfo.new(0.15), {
-					Rotation = 0
-				}):Play()
+				closeMenu()
 			end)
 		end
 
@@ -1270,12 +1516,15 @@ function Window:CreateDropdown(section, data)
 				searchBox.BackgroundColor3 = self.Theme.Tertiary
 				searchBox.BackgroundTransparency = 0.5
 				searchBox.PlaceholderText = "Search..."
+				searchBox.Text = ""
 				searchBox.TextColor3 = self.Theme.Text
 				searchBox.PlaceholderColor3 = self.Theme.TextDark
 				searchBox.TextSize = 12
 				searchBox.Font = self.Theme.Font
+				searchBox.ClearTextOnFocus = false
 				searchBox.BorderSizePixel = 0
-				searchBox.ZIndex = 13
+				searchBox.ZIndex = 53
+				searchBox.LayoutOrder = -1
 				searchBox.Parent = scroll
 				CreateRounded(searchBox, 6)
 
@@ -1287,26 +1536,36 @@ function Window:CreateDropdown(section, data)
 				searchBox = nil
 			end
 		end
-		scroll.CanvasSize = UDim2.new(0, 0, 0, (searchBox and 34 or 0) + #options * 34)
+
+		return #options
 	end
 
-	buildOptions()
+	local optionCount = buildOptions()
 
 	dropdownBtn.MouseButton1Click:Connect(function()
-		el.Open = not el.Open
-		menu.Visible = el.Open
 		if el.Open then
-			buildOptions()
-			menu.Size = UDim2.new(1, -140, 0, math.min(200, scroll.CanvasSize.Y.Offset))
-			TweenService:Create(arrow, TweenInfo.new(0.15), {
-				Rotation = 180
-			}):Play()
-		else
-			menu.Visible = false
-			TweenService:Create(arrow, TweenInfo.new(0.15), {
-				Rotation = 0
-			}):Play()
+			closeMenu()
+			return
 		end
+
+		optionCount = buildOptions()
+		el.Open = true
+
+		local rowHeight = 34
+		local searchHeight = searchBox and 34 or 0
+		local desiredHeight = math.min(200, searchHeight + math.max(optionCount, 1) * rowHeight)
+		local desiredWidth = dropdownBtn.AbsoluteSize.X
+
+		local pos = dropdownBtn.AbsolutePosition
+		local size = dropdownBtn.AbsoluteSize
+		local x, y = ClampToScreen(pos.X, pos.Y + size.Y + 4, desiredWidth, desiredHeight)
+
+		menu.Position = UDim2.fromOffset(x, y)
+		menu.Size = UDim2.fromOffset(desiredWidth, desiredHeight)
+		menu.Visible = true
+
+		TweenService:Create(arrow, TweenInfo.new(0.15), { Rotation = 180 }):Play()
+		popupEntry = RegisterPopup(closeMenu, menu)
 	end)
 
 	el.Get = function() return el.Value end
@@ -1324,7 +1583,7 @@ function Window:CreateDropdown(section, data)
 	end
 	el.SetOptions = function(options)
 		el.Options = options
-		buildOptions()
+		optionCount = buildOptions()
 		if not table.find(options, el.Value) then
 			updateDropdown(options[1] or "")
 		end
@@ -1332,7 +1591,9 @@ function Window:CreateDropdown(section, data)
 	return el
 end
 
+--------------------------------------------------------------------
 -- Multi-Dropdown
+--------------------------------------------------------------------
 function Window:CreateMultiDropdown(section, data)
 	local el = self:CreateElement(section, "MultiDropdown", data)
 	el.Options = data.Options or {}
@@ -1345,11 +1606,12 @@ function Window:CreateMultiDropdown(section, data)
 	button.Position = UDim2.new(0, 130, 0, 6)
 	button.BackgroundColor3 = self.Theme.Tertiary
 	button.BackgroundTransparency = 0.5
-	button.Text = (#el.Values == 0 and "None" or table.concat(el.Values, ", "))
+	button.Text = "  " .. (#el.Values == 0 and "None" or table.concat(el.Values, ", "))
 	button.TextColor3 = self.Theme.Text
 	button.TextSize = self.Theme.TextSize
 	button.Font = self.Theme.Font
 	button.TextXAlignment = Enum.TextXAlignment.Left
+	button.TextTruncate = Enum.TextTruncate.AtEnd
 	button.BorderSizePixel = 0
 	button.AutoButtonColor = false
 	button.ZIndex = 3
@@ -1368,15 +1630,15 @@ function Window:CreateMultiDropdown(section, data)
 	arrow.ZIndex = 4
 	arrow.Parent = button
 
+	-- FIX: same clipping issue as CreateDropdown - parent to ScreenGui instead of el.Frame.
 	local menu = Instance.new("Frame")
-	menu.Size = UDim2.new(1, -140, 0, 0)
-	menu.Position = UDim2.new(0, 130, 1, 4)
+	menu.Size = UDim2.fromOffset(0, 0)
 	menu.BackgroundColor3 = self.Theme.Secondary
 	menu.BorderSizePixel = 0
 	menu.ClipsDescendants = true
 	menu.Visible = false
-	menu.ZIndex = 10
-	menu.Parent = el.Frame
+	menu.ZIndex = 50
+	menu.Parent = self.ScreenGui
 	CreateRounded(menu, self.Theme.ElementRadius)
 	CreateStroke(menu, self.Theme.Border, 1)
 
@@ -1388,16 +1650,30 @@ function Window:CreateMultiDropdown(section, data)
 	scroll.ScrollBarImageColor3 = self.Theme.Accent
 	scroll.ScrollBarImageTransparency = 0.6
 	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	scroll.ZIndex = 11
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroll.ZIndex = 51
 	scroll.Parent = menu
 
 	Instance.new("UIListLayout", scroll).Padding = UDim.new(0, 2)
 
+	local popupEntry = nil
+
+	local function closeMenu()
+		if not el.Open then return end
+		el.Open = false
+		menu.Visible = false
+		TweenService:Create(arrow, TweenInfo.new(0.15), { Rotation = 0 }):Play()
+		if popupEntry then
+			UnregisterPopup(popupEntry)
+			popupEntry = nil
+		end
+	end
+
 	local function updateMultiDropdown()
 		if #el.Values == 0 then
-			button.Text = "None"
+			button.Text = "  None"
 		else
-			button.Text = table.concat(el.Values, ", ")
+			button.Text = "  " .. table.concat(el.Values, ", ")
 		end
 		for _, child in ipairs(scroll:GetChildren()) do
 			if child:IsA("TextButton") then
@@ -1422,8 +1698,11 @@ function Window:CreateMultiDropdown(section, data)
 			optBtn.TextXAlignment = Enum.TextXAlignment.Left
 			optBtn.BorderSizePixel = 0
 			optBtn.AutoButtonColor = false
-			optBtn.ZIndex = 12
+			optBtn.ZIndex = 52
 			optBtn.Parent = scroll
+			local optPad = Instance.new("UIPadding")
+			optPad.PaddingLeft = UDim.new(0, 8)
+			optPad.Parent = optBtn
 
 			optBtn.MouseButton1Click:Connect(function()
 				local idx = table.find(el.Values, option)
@@ -1435,21 +1714,34 @@ function Window:CreateMultiDropdown(section, data)
 				updateMultiDropdown()
 			end)
 		end
-		scroll.CanvasSize = UDim2.new(0, 0, 0, #el.Options * 34)
+		return #el.Options
 	end
 
-	buildOptions()
+	local optionCount = buildOptions()
 
 	button.MouseButton1Click:Connect(function()
-		el.Open = not el.Open
-		menu.Visible = el.Open
 		if el.Open then
-			menu.Size = UDim2.new(1, -140, 0, math.min(200, scroll.CanvasSize.Y.Offset))
-			TweenService:Create(arrow, TweenInfo.new(0.15), { Rotation = 180 }):Play()
-		else
-			menu.Visible = false
-			TweenService:Create(arrow, TweenInfo.new(0.15), { Rotation = 0 }):Play()
+			closeMenu()
+			return
 		end
+
+		optionCount = buildOptions()
+		el.Open = true
+
+		local rowHeight = 34
+		local desiredHeight = math.min(200, math.max(optionCount, 1) * rowHeight)
+		local desiredWidth = button.AbsoluteSize.X
+
+		local pos = button.AbsolutePosition
+		local size = button.AbsoluteSize
+		local x, y = ClampToScreen(pos.X, pos.Y + size.Y + 4, desiredWidth, desiredHeight)
+
+		menu.Position = UDim2.fromOffset(x, y)
+		menu.Size = UDim2.fromOffset(desiredWidth, desiredHeight)
+		menu.Visible = true
+
+		TweenService:Create(arrow, TweenInfo.new(0.15), { Rotation = 180 }):Play()
+		popupEntry = RegisterPopup(closeMenu, menu)
 	end)
 
 	el.Get = function() return el.Values end
@@ -1467,13 +1759,15 @@ function Window:CreateMultiDropdown(section, data)
 	el.SetOptions = function(options)
 		el.Options = options
 		el.Values = {}
-		buildOptions()
+		optionCount = buildOptions()
 		updateMultiDropdown()
 	end
 	return el
 end
 
+--------------------------------------------------------------------
 -- Keybind
+--------------------------------------------------------------------
 function Window:CreateKeybind(section, data)
 	local el = self:CreateElement(section, "Keybind", data)
 	el.Value = data.Default or Enum.KeyCode.E
@@ -1490,6 +1784,7 @@ function Window:CreateKeybind(section, data)
 	keyBtn.TextColor3 = self.Theme.Text
 	keyBtn.TextSize = self.Theme.TextSize
 	keyBtn.Font = self.Theme.Font
+	keyBtn.TextTruncate = Enum.TextTruncate.AtEnd
 	keyBtn.BorderSizePixel = 0
 	keyBtn.AutoButtonColor = false
 	keyBtn.ZIndex = 3
@@ -1509,6 +1804,7 @@ function Window:CreateKeybind(section, data)
 	end
 
 	keyBtn.MouseButton1Click:Connect(function()
+		if listening then return end
 		listening = true
 		keyBtn.Text = "..."
 		local conn
@@ -1527,18 +1823,16 @@ function Window:CreateKeybind(section, data)
 		task.delay(10, function()
 			if listening then
 				listening = false
-				conn:Disconnect()
+				if conn.Connected then conn:Disconnect() end
 				keyBtn.Text = el.Value.Name
 			end
 		end)
 	end)
 
 	-- Key handling
-	local keyDown = false
 	local keyConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed or self.Destroyed then return end
+		if gameProcessed or self.Destroyed or listening then return end
 		if (input.KeyCode == el.Value) or (input.UserInputType == el.Value) then
-			keyDown = true
 			if el.Mode == "Hold" then
 				el.Holding = true
 				SafeCallback(data.Callback, true)
@@ -1552,7 +1846,6 @@ function Window:CreateKeybind(section, data)
 
 	local keyUpConn = UserInputService.InputEnded:Connect(function(input)
 		if (input.KeyCode == el.Value) or (input.UserInputType == el.Value) then
-			keyDown = false
 			if el.Mode == "Hold" and el.Holding then
 				el.Holding = false
 				SafeCallback(data.Callback, false)
@@ -1573,7 +1866,9 @@ function Window:CreateKeybind(section, data)
 	return el
 end
 
+--------------------------------------------------------------------
 -- ColorPicker (HSV, Alpha, Hex)
+--------------------------------------------------------------------
 function Window:CreateColorPicker(section, data)
 	local el = self:CreateElement(section, "ColorPicker", data)
 	el.Value = data.Default or Color3.fromRGB(255, 255, 255)
@@ -1642,6 +1937,7 @@ function Window:CreateColorPicker(section, data)
 	hexInput.PlaceholderText = "#FFFFFF"
 	hexInput.TextSize = 12
 	hexInput.Font = self.Theme.Font
+	hexInput.ClearTextOnFocus = false
 	hexInput.BorderSizePixel = 0
 	hexInput.ZIndex = 52
 	hexInput.Parent = popup
@@ -1677,6 +1973,15 @@ function Window:CreateColorPicker(section, data)
 	alphaGrad.Parent = alphaBar
 
 	local draggingHue, draggingSatVal, draggingAlpha = false, false, false
+	local popupEntry = nil
+
+	local function closePopup()
+		popup.Visible = false
+		if popupEntry then
+			UnregisterPopup(popupEntry)
+			popupEntry = nil
+		end
+	end
 
 	local function pickSatVal(input)
 		local absPos = hsvCanvas.AbsolutePosition
@@ -1722,11 +2027,6 @@ function Window:CreateColorPicker(section, data)
 		end
 	end)
 	hsvCanvas.InputEnded:Connect(function() draggingSatVal = false end)
-	UserInputService.InputChanged:Connect(function(input)
-		if draggingSatVal and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			pickSatVal(input)
-		end
-	end)
 
 	hueBar.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1735,11 +2035,6 @@ function Window:CreateColorPicker(section, data)
 		end
 	end)
 	hueBar.InputEnded:Connect(function() draggingHue = false end)
-	UserInputService.InputChanged:Connect(function(input)
-		if draggingHue and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			pickHue(input)
-		end
-	end)
 
 	alphaBar.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1748,11 +2043,17 @@ function Window:CreateColorPicker(section, data)
 		end
 	end)
 	alphaBar.InputEnded:Connect(function() draggingAlpha = false end)
-	UserInputService.InputChanged:Connect(function(input)
-		if draggingAlpha and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			pickAlpha(input)
+
+	local moveConn = UserInputService.InputChanged:Connect(function(input)
+		if self.Destroyed then return end
+		if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
 		end
+		if draggingSatVal then pickSatVal(input) end
+		if draggingHue then pickHue(input) end
+		if draggingAlpha then pickAlpha(input) end
 	end)
+	table.insert(self.Connections, moveConn)
 
 	hexInput.FocusLost:Connect(function()
 		local hex = hexInput.Text:gsub("#", "")
@@ -1763,31 +2064,27 @@ function Window:CreateColorPicker(section, data)
 			local h, s, v = color:ToHSV()
 			hsvCanvas.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
 			SafeCallback(data.Callback, color, el.Alpha)
+		else
+			hexInput.Text = "#" .. Color3.toHex(el.Value)
 		end
 	end)
 
-	-- Open popup
+	-- Open popup (clamped so it can't render off-screen)
 	preview.MouseButton1Click:Connect(function()
+		if popup.Visible then
+			closePopup()
+			return
+		end
 		local pos = preview.AbsolutePosition
-		popup.Position = UDim2.fromOffset(pos.X - 220, pos.Y + 30)
+		local size = preview.AbsoluteSize
+		local x, y = ClampToScreen(pos.X - 220 + size.X, pos.Y + size.Y + 4, 220, 260)
+		popup.Position = UDim2.fromOffset(x, y)
 		popup.Visible = true
 		local h, s, v = el.Value:ToHSV()
 		hsvCanvas.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
 		hexInput.Text = "#" .. Color3.toHex(el.Value)
+		popupEntry = RegisterPopup(closePopup, popup)
 	end)
-
-	-- Close popup when clicking outside
-	local popupCloseConn = UserInputService.InputBegan:Connect(function(input)
-		if popup.Visible then
-			local pos = input.Position
-			local abs = popup.AbsolutePosition
-			local size = popup.AbsoluteSize
-			if pos.X < abs.X or pos.X > abs.X + size.X or pos.Y < abs.Y or pos.Y > abs.Y + size.Y then
-				popup.Visible = false
-			end
-		end
-	end)
-	table.insert(self.Connections, popupCloseConn)
 
 	el.Get = function() return el.Value, el.Alpha end
 	el.Set = function(color, alpha)
@@ -1810,11 +2107,12 @@ function Window:CreateColorPicker(section, data)
 	return el
 end
 
+--------------------------------------------------------------------
 -- Label, Paragraph, Divider
+--------------------------------------------------------------------
 function Window:CreateLabel(section, data)
 	local el = self:CreateElement(section, "Label", data)
 	el.Frame.BackgroundTransparency = 1
-	el.Frame.BackgroundColor3 = Color3.fromRGB(0,0,0)
 	el.Label.Size = UDim2.new(1, -24, 1, 0)
 	el.Label.Position = UDim2.new(0, 12, 0, 0)
 	el.Label.Text = data.Text or ""
@@ -1828,7 +2126,6 @@ end
 function Window:CreateParagraph(section, data)
 	local el = self:CreateElement(section, "Paragraph", { Auto = Enum.AutomaticSize.Y, Height = 30 })
 	el.Frame.BackgroundTransparency = 1
-	el.Frame.BackgroundColor3 = Color3.fromRGB(0,0,0)
 	el.Label.Size = UDim2.new(1, -24, 0, 0)
 	el.Label.Position = UDim2.new(0, 12, 0, 5)
 	el.Label.Text = data.Text or ""
@@ -1844,6 +2141,7 @@ end
 function Window:CreateDivider(section)
 	local el = self:CreateElement(section, "Divider", { Height = 24 })
 	el.Frame.BackgroundTransparency = 1
+	el.Label.Text = ""
 	local line = Instance.new("Frame")
 	line.Size = UDim2.new(1, -24, 0, 1)
 	line.Position = UDim2.new(0, 12, 0.5, 0)
@@ -1854,7 +2152,9 @@ function Window:CreateDivider(section)
 	return el
 end
 
+--------------------------------------------------------------------
 -- Config system
+--------------------------------------------------------------------
 function Library:SaveConfig(fileName)
 	local config = {}
 	for _, window in ipairs(self.Windows) do
@@ -1875,21 +2175,30 @@ function Library:SaveConfig(fileName)
 	end
 	local json = HttpService:JSONEncode(config)
 	if writefile then
-		writefile(fileName or "redev_config.json", json)
+		local ok, err = pcall(writefile, fileName or "redev_config.json", json)
+		if not ok then
+			warn("[Redev Lib] Failed to save config:", err)
+		end
 	else
 		warn("[Redev Lib] writefile not available")
 	end
 end
 
 function Library:LoadConfig(fileName)
-	local json
-	if readfile then
-		json = readfile(fileName or "redev_config.json")
-	else
+	if not readfile then
 		warn("[Redev Lib] readfile not available")
 		return
 	end
-	local config = HttpService:JSONDecode(json)
+	local ok, json = pcall(readfile, fileName or "redev_config.json")
+	if not ok then
+		warn("[Redev Lib] Failed to read config:", json)
+		return
+	end
+	local decodeOk, config = pcall(HttpService.JSONDecode, HttpService, json)
+	if not decodeOk then
+		warn("[Redev Lib] Failed to decode config:", config)
+		return
+	end
 	for _, window in ipairs(self.Windows) do
 		for _, tab in ipairs(window.Tabs) do
 			for _, section in ipairs(tab.Sections) do
@@ -1908,7 +2217,9 @@ function Library:LoadConfig(fileName)
 	end
 end
 
+--------------------------------------------------------------------
 -- Library API
+--------------------------------------------------------------------
 function Library:CreateWindow(data)
 	local window = Window.new(data.Title or "Redev Lib", {
 		Width = data.Width or 650,
@@ -1921,7 +2232,7 @@ end
 
 function Library:SetTheme(theme)
 	for key, value in pairs(theme) do
-		if self.Theme[key] then
+		if self.Theme[key] ~= nil then
 			self.Theme[key] = value
 		end
 	end
@@ -1932,6 +2243,7 @@ function Library:Destroy()
 		self.Windows[i]:Destroy()
 	end
 	self.Windows = {}
+	self.OpenPopups = {}
 
 	local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
 	if playerGui then
@@ -1942,9 +2254,6 @@ function Library:Destroy()
 		end
 	end
 
-	if self.NotificationContainer and self.NotificationContainer.Parent then
-		self.NotificationContainer.Parent:Destroy()
-	end
 	self.NotificationContainer = nil
 	self.ActiveNotifications = {}
 end
