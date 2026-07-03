@@ -1269,12 +1269,28 @@ end
 function Window:CreateButton(section, data)
 	local el = self:CreateElement(section, "Button", data)
 
+	local text = data.Text or "Click"
+
+	-- Calculate button width based on text
+	local textBounds = TextService:GetTextSize(
+		text,
+		self.Theme.TextSize,
+		self.Theme.FontBold,
+		Vector2.new(math.huge, math.huge)
+	)
+
+	local padding = 24 -- 12px on each side
+	local minWidth = 70
+
 	local button = Instance.new("TextButton")
-	button.Size = UDim2.new(0, 110, 0, 28)
+	button.Size = UDim2.new(0, math.max(minWidth, textBounds.X + padding), 0, 28)
 	button.AnchorPoint = Vector2.new(1, 0.5)
 	button.Position = UDim2.new(1, -10, 0.5, 0)
-	button.BackgroundColor3 = self.Theme.Accent
-	button.Text = data.Text or "Click"
+
+	-- Black button
+	button.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+
+	button.Text = text
 	button.TextColor3 = Color3.fromRGB(255, 255, 255)
 	button.TextSize = self.Theme.TextSize
 	button.Font = self.Theme.FontBold
@@ -1287,20 +1303,19 @@ function Window:CreateButton(section, data)
 
 	button.MouseEnter:Connect(function()
 		TweenService:Create(button, TweenInfo.new(0.15), {
-			BackgroundColor3 = self.Theme.AccentHover
+			BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 		}):Play()
 	end)
 
 	button.MouseLeave:Connect(function()
 		TweenService:Create(button, TweenInfo.new(0.15), {
-			BackgroundColor3 = self.Theme.Accent
+			BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 		}):Play()
 	end)
 
 	button.MouseButton1Click:Connect(function()
 		SafeCallback(data.Callback)
 
-		-- Ripple effect
 		local mousePos = UserInputService:GetMouseLocation()
 		local relPos = Vector2.new(
 			mousePos.X - button.AbsolutePosition.X,
@@ -1330,14 +1345,23 @@ function Window:CreateButton(section, data)
 		rippleTween:Play()
 
 		rippleTween.Completed:Connect(function()
-			if ripple and ripple.Parent then
+			if ripple.Parent then
 				ripple:Destroy()
 			end
 		end)
 	end)
 
-	el.SetText = function(text)
-		button.Text = text
+	el.SetText = function(newText)
+		button.Text = newText
+
+		local bounds = TextService:GetTextSize(
+			newText,
+			self.Theme.TextSize,
+			self.Theme.FontBold,
+			Vector2.new(math.huge, math.huge)
+		)
+
+		button.Size = UDim2.new(0, math.max(minWidth, bounds.X + padding), 0, 28)
 	end
 
 	el.Fire = function()
@@ -1346,7 +1370,6 @@ function Window:CreateButton(section, data)
 
 	return el
 end
-
 --------------------------------------------------------------------
 -- Textbox
 --------------------------------------------------------------------
