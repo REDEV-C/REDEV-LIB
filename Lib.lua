@@ -468,56 +468,64 @@ end
 -- Watermark (simple)
 --------------------------------------------------------------------
 function Library:CreateWatermark(text)
-	text = text or "CZK UNIVERSAL | BETA-1.0.1 | FPS: ..."
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "RedevWatermark"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.Parent = playerGui
+    text = text or "CZK UNIVERSAL | BETA-1.0.1 | FPS: ..."
 
-	local holder = Instance.new("Frame")
-	holder.Size = UDim2.new(0, 0, 0, 22)
-	holder.AutomaticSize = Enum.AutomaticSize.X
-	holder.Position = UDim2.new(0, 10, 0, 10)
-	holder.BackgroundColor3 = self.Theme.Secondary
-	holder.BackgroundTransparency = 0.2
-	holder.BorderSizePixel = 0
-	holder.Parent = gui
-	CreateRounded(holder, 6)
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-	local pad = Instance.new("UIPadding")
-	pad.PaddingLeft = UDim.new(0, 8)
-	pad.PaddingRight = UDim.new(0, 8)
-	pad.Parent = holder
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "RedevWatermark"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.Parent = playerGui
 
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 0, 1, 0)
-	label.AutomaticSize = Enum.AutomaticSize.X
-	label.BackgroundTransparency = 1
-	label.Text = text
-	label.TextColor3 = self.Theme.Text
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Font = self.Theme.Font
-	label.TextSize = 13
-	label.Parent = holder
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.new(0, 0, 0, 22)
+    holder.AutomaticSize = Enum.AutomaticSize.X
 
-	-- Update FPS using a heartbeat connection instead of task.wait() in a loop,
-	-- and guard against a zero delta-time producing an infinite/garbage value.
-	local conn
-	conn = RunService.Heartbeat:Connect(function(dt)
-		if not gui.Parent then
-			conn:Disconnect()
-			return
-		end
-		if dt > 0 then
-			local fps = math.floor((1 / dt) + 0.5)
-			label.Text = text:gsub("FPS: %.%.%.", "FPS: " .. fps)
-		end
-	end)
+    -- 🔥 Bottom-left anchoring fix
+    holder.AnchorPoint = Vector2.new(0, 1)
+    holder.Position = UDim2.new(0, 10, 1, -10)
 
-	return gui
+    holder.BackgroundColor3 = self.Theme.Secondary
+    holder.BackgroundTransparency = 0.2
+    holder.BorderSizePixel = 0
+    holder.Parent = gui
+
+    CreateRounded(holder, 6)
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 8)
+    pad.PaddingRight = UDim.new(0, 8)
+    pad.Parent = holder
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 0, 1, 0)
+    label.AutomaticSize = Enum.AutomaticSize.X
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = self.Theme.Text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Font = self.Theme.Font
+    label.TextSize = 13
+    label.Parent = holder
+
+    -- Update FPS using a heartbeat connection instead of task.wait() in a loop,
+    -- and guard against a zero delta-time producing an infinite/garbage value.
+    local conn
+    conn = RunService.Heartbeat:Connect(function (dt)
+    if not gui.Parent then
+        conn:Disconnect()
+        return
+    end
+    if dt > 0 then
+        local fps = math.floor((1 / dt) + 0.5)
+        label.Text = text:gsub("FPS: %.%.%.", "FPS: " .. fps)
+    end
+end)
+
+return gui
 end
+
 
 --------------------------------------------------------------------
 -- Window Class
