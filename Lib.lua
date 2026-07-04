@@ -228,7 +228,7 @@ local function GetNotificationContainer()
 	return Library.NotificationContainer
 end
 
-function Library:Notify(data)
+function Library:Notification(data)
 	data = data or {}
 	local title = data.Title or "Notification"
 	local content = data.Content or ""
@@ -467,7 +467,7 @@ end
 --------------------------------------------------------------------
 -- Watermark (simple)
 --------------------------------------------------------------------
-function Library:CreateWatermark(text)
+function Library:CreateWatermarks(text)
     text = text or "CZK UNIVERSAL | BETA-1.0.1 | FPS: 0"
 
     local RunService = game:GetService("RunService")
